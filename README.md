@@ -13,7 +13,7 @@ mps_diagnostics is available upon request for internal NHS England analysts via 
 
 **This repository is maintained by the [NHS England Data Science Team](mailto:datascience@nhs.net)**.
 
-> To contact us, please raise an issue on Github or via email.
+> To contact us, please raise an issue on GitHub or via email.
 >
 > See our other work here: [NHS England Analytical Services](https://github.com/NHSDigital/data-analytics-services)
 
