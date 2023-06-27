@@ -1,11 +1,11 @@
-## MPS Diagnostics
+# MPS Diagnostics
 
-The Person_ID is a unique patient identifier used by NHS Digital with the objective of standardizing the approach to patient-level data linkage across different data sets.
-Person_IDs are provided in many data sets available in NHS Digital, and are derived by the Master Person Service (MPS). For security and privacy reasons many users might have visibility of the tokenised version of the Person_ID, which provides an extra level of patient confidentiality.
+The Person_ID is a unique patient identifier used by NHS England with the objective of standardizing the approach to patient-level data linkage across different data sets.
+Person_IDs are provided in many data sets available in NHS England, and are derived by the Master Person Service (MPS). For security and privacy reasons many users might have visibility of the tokenised version of the Person_ID, which provides an extra level of patient confidentiality.
 MPS takes certain demographic information contained in a person’s health and care records and matches it to their unique NHS number to confirm their identity. The collection of all NHS numbers and patients’ demographic information is contained in the Personal Demographics Service (PDS) data set. 
 
 MPS Diagnostics is a new pipeline which takes the contextual information from the MPS response file, and some additional data from PDS, to create 10 columns of meta data explaining in user-friendly terms how each Person ID was derived. MPS Diagnostics pipeline generates the mps_diagnostics data set, which contains record identifiers and the MPS diagnostics columns.
-mps_diagnostics is available upon request for internal NHS England analysts via CDAs (clear data agreements), or for external NHS E users via DSAs (data sharing agreements). This document details the 10 columns, how they are derived and how they are to be used.
+mps_diagnostics is available upon request for internal NHS England analysts via CDAs (clear data agreements), or for external NHS England users via DSAs (data sharing agreements). This document details the 10 columns, how they are derived and how they are to be used.
 
 > This repository may contain references internal to NHS England that cannot be accessed publicly. We are publishing for transparency only and it is not intended that others will be able to run this code.
 
@@ -13,7 +13,7 @@ mps_diagnostics is available upon request for internal NHS England analysts via 
 
 **This repository is maintained by the [NHS England Data Science Team](mailto:datascience@nhs.net)**.
 
-> To contact us, please raise an issue on Github or via email.
+> To contact us, please raise an issue on GitHub or via email.
 >
 > See our other work here: [NHS England Analytical Services](https://github.com/NHSDigital/data-analytics-services)
 
