@@ -3,8 +3,8 @@ dbutils.widgets.removeAll()
 
 # COMMAND ----------
 
-dbutils.widgets.text('notebook_root', '/staging/mps_diagnostics/run_notebooks', 'notebook_root')
-dbutils.widgets.text('db', 'mps_diagnostics', 'db')
+dbutils.widgets.text('notebook_root', '', 'notebook_root')
+dbutils.widgets.text('db', '', 'db')
 
 DB = dbutils.widgets.get('db')
 assert DB

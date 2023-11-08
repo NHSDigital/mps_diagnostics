@@ -1,13 +1,22 @@
 # Databricks notebook source
+# MAGIC %md
+# MAGIC This notebook contains unit tests for all functions in the utils notebook.
+
+# COMMAND ----------
+
 # MAGIC %run ../notebooks/imports
 
 # COMMAND ----------
 
-# MAGIC %run ../notebooks/function_test_suite
+# MAGIC %run ../notebooks/config
 
 # COMMAND ----------
 
-# MAGIC %run ../notebooks/config
+# MAGIC %run ../schemas/pds_full
+
+# COMMAND ----------
+
+# MAGIC %run ../notebooks/CCL_copy
 
 # COMMAND ----------
 
@@ -16,7 +25,7 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC #Ambiguous join test
+# MAGIC ##DISAMBIGUATING MPS_ARCHIVE
 
 # COMMAND ----------
 
@@ -63,7 +72,7 @@ ambiguous_join_test.run()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # FILTER FOR NEW RECORDS
+# MAGIC ## FILTER FOR NEW RECORDS
 
 # COMMAND ----------
 
@@ -157,408 +166,7 @@ filter_for_new_records_test_suite.run()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # PERSON_ID
-
-# COMMAND ----------
-
-person_id_test_suite = FunctionTestSuite()
-
-@person_id_test_suite.add_test
-def test_nhs_number():
-  
-  df_input = spark.createDataFrame(
-    [
-      (1, '1234567890', None),
-      (2, '0000000000', None),
-      (3, '9999999999', None),
-      (4, '', None),
-      (5, None, ''),
-      (6, None, None),
-      (7, None, 'A987654321'),
-      (8, None, 'A987654321~~~B987654321'),
-      (9, '1234567890', 'A987654321'),
-      (10, '0000000000', 'A987654321')      
-    ],
-    ['id', RES_MATCHED_NHS_NO_COL, RES_MPS_ID_COL]
-  )
-
-  df_expected = spark.createDataFrame(
-    [
-      (1, '1234567890', None, '1234567890'),
-      (2, '0000000000', None, 'U'),
-      (3, '9999999999', None, 'U'), 
-      (4, '', None, 'U'),
-      (5, None, '', 'U'),
-      (6, None, None, 'U'),
-      (7, None, 'A987654321', 'A987654321'),
-      (8, None, 'A987654321~~~B987654321', 'A987654321'),
-      (9, '1234567890', 'A987654321', '1234567890'),
-      (10, '0000000000', 'A987654321', 'A987654321')      
-    ],
-    ['id', RES_MATCHED_NHS_NO_COL, RES_MPS_ID_COL, PERSON_ID_COL]
-  )
-  
-  df_output = add_person_id(df_input)
-  assert compare_results(df_output, df_expected, join_columns = ['id'])
-  
-person_id_test_suite.run()
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC # PERSON_ID_TYPE
-
-# COMMAND ----------
-
-add_person_id_type_test_suite = FunctionTestSuite()
-
-# runs positive tests on expected input to validate derivation
-@add_person_id_type_test_suite.add_test
-def person_id_type_positive_tests():
-  
-  df_input = spark.createDataFrame(
-    [
-      (1, '5208573082'),
-      (2, 'A956739783'),
-      (3, 'B364280571'),
-      (4, 'U964082684'),
-      
-    ],
-    ['id', PERSON_ID_COL]
-  )
-
-  df_expected = spark.createDataFrame(
-    [
-      (1, '5208573082', 'NHSNUMBER'),
-      (2, 'A956739783', 'MPS_ID'),
-      (3, 'B364280571', 'MPS_ID'),
-      (4, 'U964082684', 'ONE_TIME_USE_ID'),
-      
-    ],
-    ['id', PERSON_ID_COL, PERSON_ID_TYPE_COL]
-  )
-  
-  df_output = add_person_id_type(df_input)
-  assert compare_results(df_output, df_expected, join_columns = ['id'])
-  
-  
-# runs negative on improper input to check the derivation rules give consistent output
-@add_person_id_type_test_suite.add_test
-def person_id_type_negative_tests():
-  
-  input_schema = StructType([
-    StructField('id', IntegerType(), True),
-    StructField(PERSON_ID_COL, StringType(), True)
-  ])
-  
-  input_data = [(1, '739A123456'),
-      (2, '8765U12345'),
-      (3, 'QWERTYUIOP'),
-      (4, ''),
-      (5, None),
-      (6, '520857308'),
-      (7, '52085730821')      
-    ]
-  
-  df_input = spark.createDataFrame(data=input_data,schema=input_schema)
-  
-  expected_output_schema = StructType([
-    StructField('id', IntegerType(), True),
-    StructField(PERSON_ID_COL,StringType(),True),
-    StructField(PERSON_ID_TYPE_COL,StringType(),True)
-  ])
-
-  expected_data = [(1, '739A123456', None),
-      (2, '8765U12345', None),
-      (3, 'QWERTYUIOP', None),
-      (4, '', None),
-      (5, None, None),
-      (6, '520857308', None),
-      (7, '52085730821', None)  
-    ]
-  
-  df_expected = spark.createDataFrame(data= expected_data,schema=expected_output_schema)
-      
-  df_output = add_person_id_type(df_input)
-  assert compare_results(df_output, df_expected, join_columns = ['id'])
-  
-add_person_id_type_test_suite.run()
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC # MPS_LAST_STEP_ATTEMPTED
-
-# COMMAND ----------
-
-add_mps_last_step_attempted_test_suite = FunctionTestSuite()
-
-@add_mps_last_step_attempted_test_suite.add_test
-def mps_last_step_attempted_test_no_tracing():
-  '''
-  Test no PDS tracing run
-  '''
-  df_input = spark.createDataFrame(
-    [
-      (1, 0, None),
-      (2, 0, 0)
-    ],
-    ['id', RES_MATCHED_ALGORITHM_INDICATOR_COL, RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL]
-  )
-
-  df_expected = spark.createDataFrame(
-    [
-      (1, 0, None, 'No_PDS_tracing_run'),
-      (2, 0, 0, 'No_PDS_tracing_run')
-    ],
-    ['id', RES_MATCHED_ALGORITHM_INDICATOR_COL, RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL, MPS_LAST_STEP_ATTEMPTED_COL]
-  )
-  
-  df_output = add_mps_last_step_attempted(df_input)
-  assert compare_results(df_output, df_expected, join_columns = ['id'])
-
-  
-@add_mps_last_step_attempted_test_suite.add_test
-def mps_last_step_attempted_positive_tests():
-  ''' 
-  runs positive tests on expected input to validate derivation  
-  '''
-  df_input = spark.createDataFrame(
-    [
-      (1, 3, None),
-      (2, 3, 0),
-      (3, 4, None),
-      (4, 4, 0),
-      (5, 1, None),
-      (6, 1, 0)
-    ],
-    ['id', RES_MATCHED_ALGORITHM_INDICATOR_COL, RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL]
-  )
-
-  df_expected = spark.createDataFrame(
-    [
-      (1, 3, None, 'alphanumeric_trace_live'),
-      (2, 3, 0, 'alphanumeric_trace_live'),
-      (3, 4, None, 'algorithmic_trace_live'),
-      (4, 4, 0, 'algorithmic_trace_live'),
-      (5, 1, None, 'CCT_cached'),
-      (6, 1, 0, 'CCT_live')
-    ],
-    ['id', RES_MATCHED_ALGORITHM_INDICATOR_COL, RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL, MPS_LAST_STEP_ATTEMPTED_COL]
-  )
-  
-  df_output = add_mps_last_step_attempted(df_input)
-  assert compare_results(df_output, df_expected, join_columns = ['id'])
-  
-  
-@add_mps_last_step_attempted_test_suite.add_test
-def mps_last_step_attempted_negative_tests():
-  '''
-  runs negative on improper input to check the derivation rules give consistent output
-  '''  
-  
-  input_schema = StructType([      
-      StructField('id', IntegerType(), True),
-      StructField(RES_MATCHED_ALGORITHM_INDICATOR_COL, IntegerType(), True),
-      StructField(RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL, IntegerType(), True)
-    ])
-    
-  df_input = spark.createDataFrame(
-      data= [
-      (1, 5, None),
-      (2, 1000, 1),      
-      (3, 2, 0)
-      ],
-      schema = input_schema
-    )
-    
-  output_schema = StructType([      
-      StructField('id',IntegerType(),True),
-      StructField(RES_MATCHED_ALGORITHM_INDICATOR_COL, IntegerType(), True),
-      StructField(RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL, IntegerType(), True),
-      StructField(MPS_LAST_STEP_ATTEMPTED_COL, StringType(), True)  
-    ])    
-    
-  df_expected = spark.createDataFrame(
-      data= [
-      (1, 5, None, None),
-      (2, 1000, 1, None),      
-      (3, 2, 0, None)
-      ],
-      schema = output_schema
-    ) 
-  
-  df_output = add_mps_last_step_attempted(df_input)
-  assert compare_results(df_output, df_expected, join_columns = ['id'])
-  
-add_mps_last_step_attempted_test_suite.run()
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC # MPS_SUCCESSFUL_STEP
-
-# COMMAND ----------
-
-add_mps_successful_step_test_suite = FunctionTestSuite()
-
-@add_mps_successful_step_test_suite.add_test
-def test_mps_successful_step_unsuccessful_or_no_tracing():
-  '''
-  Test no PDS tracing run or unsuccessful
-  '''
-  
-  df_input = spark.createDataFrame(
-    [
-      (1, 0, 0, None, 'ONE_TIME_USE_ID'),
-      (2, 0, 0, 0, 'ONE_TIME_USE_ID'),
-      (3, 3, 0, 0, 'MPS_ID'),
-      (4, 4, 0, 0, 'ONE_TIME_USE_ID')
-    ],
-    ['id',RES_MATCHED_ALGORITHM_INDICATOR_COL, RES_MATCHED_CONFIDENCE_PERCENTAGE_COL, RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL, PERSON_ID_TYPE_COL]
-  )
-
-  df_expected = spark.createDataFrame(
-    [
-      (1, 0, 0, None, 'ONE_TIME_USE_ID', 'No_PDS_tracing_run'),
-      (2, 0, 0, 0, 'ONE_TIME_USE_ID', 'No_PDS_tracing_run'),
-      (3, 3, 0, 0, 'MPS_ID', 'No_PDS_match_found'),
-      (4, 4, 0, 0, 'ONE_TIME_USE_ID', 'No_PDS_match_found')
-    ],
-    ['id', RES_MATCHED_ALGORITHM_INDICATOR_COL, RES_MATCHED_CONFIDENCE_PERCENTAGE_COL, RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL, PERSON_ID_TYPE_COL, MPS_SUCCESSFUL_STEP_COL]
-  )
-  
-  df_output = add_mps_successful_step(df_input)
-  assert compare_results(df_output, df_expected, join_columns = ['id'])
-
-
-@add_mps_successful_step_test_suite.add_test
-def mps_successful_step_positive_tests():
-  '''
-  runs positive tests on expected input to validate derivation  
-  '''
-  
-  df_input = spark.createDataFrame(
-    [
-      (1, 1, 100, 0, 'NHSNUMBER'),
-      (2, 1, 100, None, 'NHSNUMBER'),
-      (3, 3, 100, 0, 'NHSNUMBER'),
-      (4, 3, 100, None, 'NHSNUMBER'),
-      (5, 4, 50, 100, 'NHSNUMBER'),
-      (6, 4, 49, 33, 'MPS_ID')
-    ],
-    ['id', RES_MATCHED_ALGORITHM_INDICATOR_COL, RES_MATCHED_CONFIDENCE_PERCENTAGE_COL, RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL, PERSON_ID_TYPE_COL]
-  )
-
-  df_expected = spark.createDataFrame(
-    [
-      (1, 1, 100, 0, 'NHSNUMBER', 'CCT_live'),
-      (2, 1, 100, None, 'NHSNUMBER', 'CCT_cached'),
-      (3, 3, 100, 0, 'NHSNUMBER', 'alphanumeric_trace_live'),
-      (4, 3, 100, None, 'NHSNUMBER', 'alphanumeric_trace_live'),
-      (5, 4, 50, 100, 'NHSNUMBER', 'algorithmic_trace_live'),
-      (6, 4, 49, 33, 'MPS_ID', None)
-    ],
-    ['id', RES_MATCHED_ALGORITHM_INDICATOR_COL, RES_MATCHED_CONFIDENCE_PERCENTAGE_COL, RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL,PERSON_ID_TYPE_COL, MPS_SUCCESSFUL_STEP_COL]
-  )
-  
-  df_output = add_mps_successful_step(df_input)
-  assert compare_results(df_output, df_expected, join_columns = ['id'])
-
-
-@add_mps_successful_step_test_suite.add_test
-def mps_successful_step_negative_tests():
-  '''
-  runs negative on improper input to check the derivation rules give consistent output
-  '''
-  
-  input_schema = StructType([      
-      StructField('id', IntegerType(), True),
-      StructField(RES_MATCHED_ALGORITHM_INDICATOR_COL, IntegerType(), True),
-      StructField(RES_MATCHED_CONFIDENCE_PERCENTAGE_COL, IntegerType(), True),
-      StructField(RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL, IntegerType(), True),
-      StructField(PERSON_ID_TYPE_COL, StringType(), True)
-    ])  
-  
-  df_input = spark.createDataFrame(
-    [
-      (1, 5, 100, 100, None),
-      (2, 1000, 1, 100, None),
-      (3, 2, 50, 0, None) 
-    ],
-    schema = input_schema
-  )
-  
-  output_schema = StructType([      
-      StructField('id', IntegerType(), True),
-      StructField(RES_MATCHED_ALGORITHM_INDICATOR_COL, IntegerType(), True),
-      StructField(RES_MATCHED_CONFIDENCE_PERCENTAGE_COL, IntegerType(), True),
-      StructField(RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL, IntegerType(), True),
-      StructField(PERSON_ID_TYPE_COL, StringType(), True),
-      StructField(MPS_SUCCESSFUL_STEP_COL, StringType(), True)
-    ]) 
-  
-  df_expected = spark.createDataFrame(
-    [
-      (1, 5, 100, 100, None, None),
-      (2, 1000, 1, 100, None, None),
-      (3, 2, 50, 0, None, None)      
-    ],
-    schema = output_schema
-  )
-  
-  df_output = add_mps_successful_step(df_input)
-  assert compare_results(df_output, df_expected, join_columns = ['id'])
-    
-    
-add_mps_successful_step_test_suite.run()
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC # PDS_MATCH_FLAG
-
-# COMMAND ----------
-
-add_pds_match_flag_suite = FunctionTestSuite()
-
-@add_pds_match_flag_suite.add_test
-def pds_match_flag_tests():
-  '''
-  Testing the cases for the PDS_MATCH_FLAG 
-  '''
-  
-  df_input = spark.createDataFrame(
-    [
-      (1, 'NHSNUMBER'),
-      (2, 'MPS_ID'),
-      (3, 'ONE_TIME_USE_ID'),
-      (4, None),
-      (5, '')
-    ],
-    ['id', PERSON_ID_TYPE_COL]
-  )
-
-  df_expected = spark.createDataFrame(
-    [
-      (1, 'NHSNUMBER', True),
-      (2, 'MPS_ID', False),
-      (3, 'ONE_TIME_USE_ID', False),
-      (4, None, False),
-      (5, '', False)
-    ],
-    ['id', PERSON_ID_TYPE_COL, PDS_MATCH_FLAG_COL]
-  )
-  
-  df_output = add_pds_match_flag(df_input)
-  assert compare_results(df_output, df_expected, join_columns = ['id'])
-  
-add_pds_match_flag_suite.run()
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC # VALIDATE_SCHEMA
+# MAGIC ## VALIDATE SCHEMA
 
 # COMMAND ----------
 
@@ -749,7 +357,507 @@ validate_schema_suite.run()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # SUPERSEDED_NHS_NUMBER_FLAG
+# MAGIC ## PERSON_ID
+
+# COMMAND ----------
+
+person_id_test_suite = FunctionTestSuite()
+
+@person_id_test_suite.add_test
+def test_nhs_number():
+  
+  df_input = spark.createDataFrame(
+    [
+      (1, '1234567890', None),
+      (2, '0000000000', None),
+      (3, '9999999999', None),
+      (4, '', None),
+      (5, None, ''),
+      (6, None, None),
+      (7, None, 'A987654321'),
+      (8, None, 'A987654321~~~B987654321'),
+      (9, '1234567890', 'A987654321'),
+      (10, '0000000000', 'A987654321')      
+    ],
+    ['id', RES_MATCHED_NHS_NO_COL, RES_MPS_ID_COL]
+  )
+
+  df_expected = spark.createDataFrame(
+    [
+      (1, '1234567890', None, '1234567890'),
+      (2, '0000000000', None, 'U'),
+      (3, '9999999999', None, 'U'), 
+      (4, '', None, 'U'),
+      (5, None, '', 'U'),
+      (6, None, None, 'U'),
+      (7, None, 'A987654321', 'A987654321'),
+      (8, None, 'A987654321~~~B987654321', 'A987654321'),
+      (9, '1234567890', 'A987654321', '1234567890'),
+      (10, '0000000000', 'A987654321', 'A987654321')      
+    ],
+    ['id', RES_MATCHED_NHS_NO_COL, RES_MPS_ID_COL, PERSON_ID_COL]
+  )
+  
+  df_output = add_person_id(df_input)
+  assert compare_results(df_output, df_expected, join_columns = ['id'])
+  
+person_id_test_suite.run()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## PERSON_ID_TYPE
+
+# COMMAND ----------
+
+add_person_id_type_test_suite = FunctionTestSuite()
+
+# runs positive tests on expected input to validate derivation
+@add_person_id_type_test_suite.add_test
+def person_id_type_positive_tests():
+  
+  df_input = spark.createDataFrame(
+    [
+      (1, '5208573082'),
+      (2, 'A956739783'),
+      (3, 'B364280571'),
+      (4, 'U964082684'),
+      
+    ],
+    ['id', PERSON_ID_COL]
+  )
+
+  df_expected = spark.createDataFrame(
+    [
+      (1, '5208573082', 'NHSNUMBER'),
+      (2, 'A956739783', 'MPS_ID'),
+      (3, 'B364280571', 'MPS_ID'),
+      (4, 'U964082684', 'ONE_TIME_USE_ID'),
+      
+    ],
+    ['id', PERSON_ID_COL, PERSON_ID_TYPE_COL]
+  )
+  
+  df_output = add_person_id_type(df_input)
+  assert compare_results(df_output, df_expected, join_columns = ['id'])
+  
+  
+# runs negative on improper input to check the derivation rules give consistent output
+@add_person_id_type_test_suite.add_test
+def person_id_type_negative_tests():
+  
+  input_schema = StructType([
+    StructField('id', IntegerType(), True),
+    StructField(PERSON_ID_COL, StringType(), True)
+  ])
+  
+  input_data = [(1, '739A123456'),
+      (2, '8765U12345'),
+      (3, 'QWERTYUIOP'),
+      (4, ''),
+      (5, None),
+      (6, '520857308'),
+      (7, '52085730821')      
+    ]
+  
+  df_input = spark.createDataFrame(data=input_data,schema=input_schema)
+  
+  expected_output_schema = StructType([
+    StructField('id', IntegerType(), True),
+    StructField(PERSON_ID_COL,StringType(),True),
+    StructField(PERSON_ID_TYPE_COL,StringType(),True)
+  ])
+
+  expected_data = [(1, '739A123456', None),
+      (2, '8765U12345', None),
+      (3, 'QWERTYUIOP', None),
+      (4, '', None),
+      (5, None, None),
+      (6, '520857308', None),
+      (7, '52085730821', None)  
+    ]
+  
+  df_expected = spark.createDataFrame(data= expected_data,schema=expected_output_schema)
+      
+  df_output = add_person_id_type(df_input)
+  assert compare_results(df_output, df_expected, join_columns = ['id'])
+  
+add_person_id_type_test_suite.run()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## MPS_LAST_STEP_ATTEMPTED
+
+# COMMAND ----------
+
+add_mps_last_step_attempted_test_suite = FunctionTestSuite()
+
+@add_mps_last_step_attempted_test_suite.add_test
+def mps_last_step_attempted_test_no_tracing():
+  '''
+  Test no PDS tracing run
+  '''
+  df_input = spark.createDataFrame(
+    [
+      (1, 0, None),
+      (2, 0, 0)
+    ],
+    ['id', RES_MATCHED_ALGORITHM_INDICATOR_COL, RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL]
+  )
+
+  df_expected = spark.createDataFrame(
+    [
+      (1, 0, None, 'No_PDS_tracing_run'),
+      (2, 0, 0, 'No_PDS_tracing_run')
+    ],
+    ['id', RES_MATCHED_ALGORITHM_INDICATOR_COL, RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL, MPS_LAST_STEP_ATTEMPTED_COL]
+  )
+  
+  df_output = add_mps_last_step_attempted(df_input)
+  assert compare_results(df_output, df_expected, join_columns = ['id'])
+
+  
+@add_mps_last_step_attempted_test_suite.add_test
+def mps_last_step_attempted_positive_tests():
+  ''' 
+  runs positive tests on expected input to validate derivation  
+  '''
+  df_input = spark.createDataFrame(
+    [
+      (1, 3, None),
+      (2, 3, 0),
+      (3, 4, None),
+      (4, 4, 0),
+      (5, 1, None),
+      (6, 1, 0)
+    ],
+    ['id', RES_MATCHED_ALGORITHM_INDICATOR_COL, RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL]
+  )
+
+  df_expected = spark.createDataFrame(
+    [
+      (1, 3, None, 'alphanumeric_trace_live'),
+      (2, 3, 0, 'alphanumeric_trace_live'),
+      (3, 4, None, 'algorithmic_trace_live'),
+      (4, 4, 0, 'algorithmic_trace_live'),
+      (5, 1, None, 'CCT_cached'),
+      (6, 1, 0, 'CCT_live')
+    ],
+    ['id', RES_MATCHED_ALGORITHM_INDICATOR_COL, RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL, MPS_LAST_STEP_ATTEMPTED_COL]
+  )
+  
+  df_output = add_mps_last_step_attempted(df_input)
+  assert compare_results(df_output, df_expected, join_columns = ['id'])
+  
+  
+@add_mps_last_step_attempted_test_suite.add_test
+def mps_last_step_attempted_negative_tests():
+  '''
+  runs negative on improper input to check the derivation rules give consistent output
+  '''  
+  
+  input_schema = StructType([      
+      StructField('id', IntegerType(), True),
+      StructField(RES_MATCHED_ALGORITHM_INDICATOR_COL, IntegerType(), True),
+      StructField(RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL, IntegerType(), True)
+    ])
+    
+  df_input = spark.createDataFrame(
+      data= [
+      (1, 5, None),
+      (2, 1000, 1),      
+      (3, 2, 0)
+      ],
+      schema = input_schema
+    )
+    
+  output_schema = StructType([      
+      StructField('id',IntegerType(),True),
+      StructField(RES_MATCHED_ALGORITHM_INDICATOR_COL, IntegerType(), True),
+      StructField(RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL, IntegerType(), True),
+      StructField(MPS_LAST_STEP_ATTEMPTED_COL, StringType(), True)  
+    ])    
+    
+  df_expected = spark.createDataFrame(
+      data= [
+      (1, 5, None, None),
+      (2, 1000, 1, None),      
+      (3, 2, 0, None)
+      ],
+      schema = output_schema
+    ) 
+  
+  df_output = add_mps_last_step_attempted(df_input)
+  assert compare_results(df_output, df_expected, join_columns = ['id'])
+  
+add_mps_last_step_attempted_test_suite.run()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## MPS_SUCCESSFUL_STEP
+
+# COMMAND ----------
+
+add_mps_successful_step_test_suite = FunctionTestSuite()
+
+@add_mps_successful_step_test_suite.add_test
+def test_mps_successful_step_unsuccessful_or_no_tracing():
+  '''
+  Test no PDS tracing run or unsuccessful
+  '''
+  
+  df_input = spark.createDataFrame(
+    [
+      (1, 0, 0, None, 'ONE_TIME_USE_ID'),
+      (2, 0, 0, 0, 'ONE_TIME_USE_ID'),
+      (3, 3, 0, 0, 'MPS_ID'),
+      (4, 4, 0, 0, 'ONE_TIME_USE_ID')
+    ],
+    ['id',RES_MATCHED_ALGORITHM_INDICATOR_COL, RES_MATCHED_CONFIDENCE_PERCENTAGE_COL, RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL, PERSON_ID_TYPE_COL]
+  )
+
+  df_expected = spark.createDataFrame(
+    [
+      (1, 0, 0, None, 'ONE_TIME_USE_ID', 'No_PDS_tracing_run'),
+      (2, 0, 0, 0, 'ONE_TIME_USE_ID', 'No_PDS_tracing_run'),
+      (3, 3, 0, 0, 'MPS_ID', 'No_PDS_match_found'),
+      (4, 4, 0, 0, 'ONE_TIME_USE_ID', 'No_PDS_match_found')
+    ],
+    ['id', RES_MATCHED_ALGORITHM_INDICATOR_COL, RES_MATCHED_CONFIDENCE_PERCENTAGE_COL, RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL, PERSON_ID_TYPE_COL, MPS_SUCCESSFUL_STEP_COL]
+  )
+  
+  df_output = add_mps_successful_step(df_input)
+  assert compare_results(df_output, df_expected, join_columns = ['id'])
+
+
+@add_mps_successful_step_test_suite.add_test
+def mps_successful_step_positive_tests():
+  '''
+  runs positive tests on expected input to validate derivation  
+  '''
+  
+  df_input = spark.createDataFrame(
+    [
+      (1, 1, 100, 0, 'NHSNUMBER'),
+      (2, 1, 100, None, 'NHSNUMBER'),
+      (3, 3, 100, 0, 'NHSNUMBER'),
+      (4, 3, 100, None, 'NHSNUMBER'),
+      (5, 4, 50, 100, 'NHSNUMBER'),
+      (6, 4, 49, 33, 'MPS_ID')
+    ],
+    ['id', RES_MATCHED_ALGORITHM_INDICATOR_COL, RES_MATCHED_CONFIDENCE_PERCENTAGE_COL, RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL, PERSON_ID_TYPE_COL]
+  )
+
+  df_expected = spark.createDataFrame(
+    [
+      (1, 1, 100, 0, 'NHSNUMBER', 'CCT_live'),
+      (2, 1, 100, None, 'NHSNUMBER', 'CCT_cached'),
+      (3, 3, 100, 0, 'NHSNUMBER', 'alphanumeric_trace_live'),
+      (4, 3, 100, None, 'NHSNUMBER', 'alphanumeric_trace_live'),
+      (5, 4, 50, 100, 'NHSNUMBER', 'algorithmic_trace_live'),
+      (6, 4, 49, 33, 'MPS_ID', None)
+    ],
+    ['id', RES_MATCHED_ALGORITHM_INDICATOR_COL, RES_MATCHED_CONFIDENCE_PERCENTAGE_COL, RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL,PERSON_ID_TYPE_COL, MPS_SUCCESSFUL_STEP_COL]
+  )
+  
+  df_output = add_mps_successful_step(df_input)
+  assert compare_results(df_output, df_expected, join_columns = ['id'])
+
+
+@add_mps_successful_step_test_suite.add_test
+def mps_successful_step_negative_tests():
+  '''
+  runs negative on improper input to check the derivation rules give consistent output
+  '''
+  
+  input_schema = StructType([      
+      StructField('id', IntegerType(), True),
+      StructField(RES_MATCHED_ALGORITHM_INDICATOR_COL, IntegerType(), True),
+      StructField(RES_MATCHED_CONFIDENCE_PERCENTAGE_COL, IntegerType(), True),
+      StructField(RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL, IntegerType(), True),
+      StructField(PERSON_ID_TYPE_COL, StringType(), True)
+    ])  
+  
+  df_input = spark.createDataFrame(
+    [
+      (1, 5, 100, 100, None),
+      (2, 1000, 1, 100, None),
+      (3, 2, 50, 0, None) 
+    ],
+    schema = input_schema
+  )
+  
+  output_schema = StructType([      
+      StructField('id', IntegerType(), True),
+      StructField(RES_MATCHED_ALGORITHM_INDICATOR_COL, IntegerType(), True),
+      StructField(RES_MATCHED_CONFIDENCE_PERCENTAGE_COL, IntegerType(), True),
+      StructField(RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL, IntegerType(), True),
+      StructField(PERSON_ID_TYPE_COL, StringType(), True),
+      StructField(MPS_SUCCESSFUL_STEP_COL, StringType(), True)
+    ]) 
+  
+  df_expected = spark.createDataFrame(
+    [
+      (1, 5, 100, 100, None, None),
+      (2, 1000, 1, 100, None, None),
+      (3, 2, 50, 0, None, None)      
+    ],
+    schema = output_schema
+  )
+  
+  df_output = add_mps_successful_step(df_input)
+  assert compare_results(df_output, df_expected, join_columns = ['id'])
+    
+    
+add_mps_successful_step_test_suite.run()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## PDS_MATCH_FLAG
+
+# COMMAND ----------
+
+add_pds_match_flag_suite = FunctionTestSuite()
+
+@add_pds_match_flag_suite.add_test
+def pds_match_flag_tests():
+  '''
+  Testing the cases for the PDS_MATCH_FLAG 
+  '''
+  
+  df_input = spark.createDataFrame(
+    [
+      (1, 'NHSNUMBER'),
+      (2, 'MPS_ID'),
+      (3, 'ONE_TIME_USE_ID'),
+      (4, None),
+      (5, '')
+    ],
+    ['id', PERSON_ID_TYPE_COL]
+  )
+
+  df_expected = spark.createDataFrame(
+    [
+      (1, 'NHSNUMBER', True),
+      (2, 'MPS_ID', False),
+      (3, 'ONE_TIME_USE_ID', False),
+      (4, None, False),
+      (5, '', False)
+    ],
+    ['id', PERSON_ID_TYPE_COL, PDS_MATCH_FLAG_COL]
+  )
+  
+  df_output = add_pds_match_flag(df_input)
+  assert compare_results(df_output, df_expected, join_columns = ['id'])
+  
+add_pds_match_flag_suite.run()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## SUPERSEDED_NHS_NUMBER_FLAG
+
+# COMMAND ----------
+
+add_request_date_test = FunctionTestSuite()
+
+@add_request_date_test.add_test
+def test_add_request_date():
+  
+  df_input = spark.createDataFrame(
+    [
+      (1, datetime(2010, 7, 1), 20100701),
+      (2, None, 20100701),
+      (3, None, None),
+      (4, datetime(2010, 7, 1), 20200701)
+    ],
+    StructType([
+       StructField('id', IntegerType()),
+       StructField(REQ_CREATED_COL, TimestampType()),
+       StructField(REQ_AS_AT_DATE_COL, IntegerType())
+    ])
+  )
+  
+  df_expected = spark.createDataFrame(
+    [
+      (1, datetime(2010, 7, 1), 20100701, datetime(2010, 7, 1)), 
+      (2, None, 20100701, datetime(2010, 7, 1)),
+      (3, None, None, None),
+      (4, datetime(2010, 7, 1), 20200701, datetime(2020, 7, 1))
+    ],
+    StructType([
+       StructField('id', IntegerType()),
+       StructField(REQ_CREATED_COL, TimestampType()),
+       StructField(REQ_AS_AT_DATE_COL, IntegerType()),
+       StructField('request_date', DateType())
+    ])
+  )
+                
+  df_output = add_request_date_col(df_input)
+  
+  assert compare_results(df_output, df_expected, join_columns = ['id'])
+  
+add_request_date_test.run()
+
+# COMMAND ----------
+
+explode_pds_test = FunctionTestSuite()
+
+@explode_pds_test.add_test
+def test_explode_pds_by_replacementof():
+  
+  df_pds_full = spark.createDataFrame(
+    [
+      {
+        PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '3333333333',
+        PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: [
+          {PDS_KEYS['FROM_KEY']: None, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: 20100101090000, PDS_KEYS['VALUE_KEY']: '1111111111'},
+          {PDS_KEYS['FROM_KEY']: 20090101, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: None, PDS_KEYS['VALUE_KEY']: '2222222222'},
+        ],
+      },
+      {
+        PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '5555555555',
+        PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: [
+          {PDS_KEYS['FROM_KEY']: None, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: 20100101090000, PDS_KEYS['VALUE_KEY']: '4444444444'},
+        ],
+      },
+      {
+        PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '6666666666',
+        PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: [],
+      },
+      {
+        PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '7777777777',
+        PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: [
+          {PDS_KEYS['FROM_KEY']: None, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: 20100101090000, PDS_KEYS['VALUE_KEY']: 'ABC1234567'},
+        ],
+      }
+    ],
+    PDS_FULL_SCHEMA
+  )
+
+  df_expected = spark.createDataFrame(
+    [
+      ('3333333333', '1111111111', datetime(2010,1,1), None), # 3333333333 replaces 2 NHS numbers, both are found
+      ('3333333333', '2222222222', datetime(2009,1,1), None),
+      ('5555555555', '4444444444', datetime(2010,1,1), None), # 5555555555 replaces 1 NHS number
+                                                              # 6666666666 replaces 0 NHS numbers, so is not added to the exploded table
+                                                              # 7777777777 replaces an old style NHS number, so is not added to the exploded table
+    ],
+    StructType([
+      StructField(PDS_SCHEMA['NHS_NUMBER_COL']['NAME'], StringType()),
+      StructField('replacementOf_value', StringType()),
+      StructField('replacementOf_start_date', DateType()),
+      StructField('replacementOf_end_date', DateType()),
+    ])
+  )
+  
+  df_output = explode_pds_by_replacementof(df_pds_full)
+  assert compare_results(df_output, df_expected, join_columns = [PDS_SCHEMA['NHS_NUMBER_COL']['NAME'], 'replacementOf_value'])       
+        
+explode_pds_test.run()
 
 # COMMAND ----------
 
@@ -785,27 +893,40 @@ def single_match_tests():
   
   df_pds_full = spark.createDataFrame(
     [
-      ('1111111111', None),
-      ('2222222222', [{'from': 20100101, 'to': 20200101, PDS_KEYS['SED_LOW_KEY']: 20100101090000, PDS_KEYS['SED_HIGH_KEY']: 20200101090000, 'value': '1111111111'}]),
-      ('3333333333', None),
-      ('4444444444', [{'from': 20100101, 'to': None, PDS_KEYS['SED_LOW_KEY']: None, PDS_KEYS['SED_HIGH_KEY']: None, 'value': '3333333333'}]),
-      ('5555555555', None),
-      ('6666666666', [{'from': None, 'to': 20200101, PDS_KEYS['SED_LOW_KEY']: 20100101090000, PDS_KEYS['SED_HIGH_KEY']: None, 'value': 'ABCD111111'}]),
-      ('8888888888', None),
-      ('9999999999', [{'from': None, 'to': None, PDS_KEYS['SED_LOW_KEY']: None, PDS_KEYS['SED_HIGH_KEY']: None, 'value': '8888888888'}]),
+      {
+        PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '1111111111',
+        PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: None
+      },
+      {
+        PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '2222222222',
+        PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: [{PDS_KEYS['FROM_KEY']: 20100101, PDS_KEYS['TO_KEY']: 20200101, PDS_KEYS['SED_LOW_KEY']: 20100101090000, PDS_KEYS['SED_HIGH_KEY']: 20200101090000, PDS_KEYS['VALUE_KEY']: '1111111111'}]
+      },
+      {
+        PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '3333333333',
+        PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: None
+      },
+      {
+        PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '4444444444',
+        PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: [{PDS_KEYS['FROM_KEY']: 20100101, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: None, PDS_KEYS['SED_HIGH_KEY']: None, PDS_KEYS['VALUE_KEY']: '3333333333'}]
+      },
+      {
+        PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '5555555555',
+        PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: None
+      },
+      {
+        PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '6666666666',
+        PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: [{PDS_KEYS['FROM_KEY']: None, PDS_KEYS['TO_KEY']: 20200101, PDS_KEYS['SED_LOW_KEY']: 20100101090000, PDS_KEYS['SED_HIGH_KEY']: None, PDS_KEYS['VALUE_KEY']: 'ABCD111111'}]
+      },
+      {
+        PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '8888888888',
+        PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: None
+      },
+      {
+        PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '9999999999',
+        PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: [{PDS_KEYS['FROM_KEY']: None, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: None, PDS_KEYS['SED_HIGH_KEY']: None, PDS_KEYS['VALUE_KEY']: '8888888888'}]
+      }
     ],
-    StructType([
-      StructField('nhs_number', StringType()),
-      StructField('replacementOf', ArrayType(
-        StructType([
-          StructField('from', IntegerType()),
-          StructField('to', IntegerType()),
-          StructField(PDS_KEYS['SED_LOW_KEY'], StringType()),
-          StructField(PDS_KEYS['SED_HIGH_KEY'], StringType()),
-          StructField('value', StringType())
-        ])
-      ))
-    ])
+    PDS_FULL_SCHEMA
   )
   
   df_expected = spark.createDataFrame(
@@ -862,50 +983,39 @@ def multiple_match_tests():
   
   df_pds_full = spark.createDataFrame(
     [
-      ('2222222222', [
-        {'from': 20100101, 'to': None, PDS_KEYS['SED_LOW_KEY']: 20100101090000, PDS_KEYS['SED_HIGH_KEY']: None, 'value': '1111111111'},
-        {'from': 20090101, 'to': 20200101, PDS_KEYS['SED_LOW_KEY']: None, PDS_KEYS['SED_HIGH_KEY']: 20200101090000, 'value': '1111111111'}
-      ]),
-      ('4444444444', [
-        {'from': None, 'to': None, PDS_KEYS['SED_LOW_KEY']: 20100101090000, PDS_KEYS['SED_HIGH_KEY']: None, 'value': '3333333333'},
-        {'from': None, 'to': 20200101, PDS_KEYS['SED_LOW_KEY']: 20120101090000, PDS_KEYS['SED_HIGH_KEY']: None, 'value': '3333333333'}
-      ]),
-      ('7777777777', [
-        {'from': None, 'to': None, PDS_KEYS['SED_LOW_KEY']: 20100101090000, PDS_KEYS['SED_HIGH_KEY']: None, 'value': '6666666666'},
-        {'from': None, 'to': None, PDS_KEYS['SED_LOW_KEY']: 20100101090000, PDS_KEYS['SED_HIGH_KEY']: 20200101090000, 'value': '5555555555'}
-      ]),
-      ('9999999999', [
-        {'from': None, 'to': None, PDS_KEYS['SED_LOW_KEY']: 20120101090000, PDS_KEYS['SED_HIGH_KEY']: None, 'value': '8888888888'},
-        {'from': None, 'to': None, PDS_KEYS['SED_LOW_KEY']: 20150101090000, PDS_KEYS['SED_HIGH_KEY']: 20200101090000, 'value': '8888888888'}
-      ]),
-      ('1313131313', [
-        {'from': 20150101, 'to': 20200101, PDS_KEYS['SED_LOW_KEY']: 20150101090000, PDS_KEYS['SED_HIGH_KEY']: 20200101090000, 'value': '1212121212'}
-      ]),
-      ('1313131313', [
-        {'from': 20100101, 'to': 20200101, PDS_KEYS['SED_LOW_KEY']: None, PDS_KEYS['SED_HIGH_KEY']: None, 'value': '1414141414'}
-      ]),
-      ('1616161616', [
-        {'from': None, 'to': None, PDS_KEYS['SED_LOW_KEY']: 20100101090000, PDS_KEYS['SED_HIGH_KEY']: 20200101090000, 'value': '1515151515'}
-      ]),
-      ('1616161616', [
-        {'from': 20090101, 'to': None, PDS_KEYS['SED_LOW_KEY']: None, PDS_KEYS['SED_HIGH_KEY']: 20200101090000, 'value': '1515151515'}
-      ]),
-      ('1616161616', [
-        {'from': None, 'to': 20200101, PDS_KEYS['SED_LOW_KEY']: 20080101090000, PDS_KEYS['SED_HIGH_KEY']: None, 'value': '1515151515'}
-      ])
+      {PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '2222222222', PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: [
+        {PDS_KEYS['FROM_KEY']: 20100101, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: 20100101090000, PDS_KEYS['SED_HIGH_KEY']: None, PDS_KEYS['VALUE_KEY']: '1111111111'},
+        {PDS_KEYS['FROM_KEY']: 20090101, PDS_KEYS['TO_KEY']: 20200101, PDS_KEYS['SED_LOW_KEY']: None, PDS_KEYS['SED_HIGH_KEY']: 20200101090000, PDS_KEYS['VALUE_KEY']: '1111111111'}
+      ]},
+      {PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '4444444444', PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: [
+        {PDS_KEYS['FROM_KEY']: None, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: 20100101090000, PDS_KEYS['SED_HIGH_KEY']: None, PDS_KEYS['VALUE_KEY']: '3333333333'},
+        {PDS_KEYS['FROM_KEY']: None, PDS_KEYS['TO_KEY']: 20200101, PDS_KEYS['SED_LOW_KEY']: 20120101090000, PDS_KEYS['SED_HIGH_KEY']: None, PDS_KEYS['VALUE_KEY']: '3333333333'}
+      ]},
+      {PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '7777777777', PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: [
+        {PDS_KEYS['FROM_KEY']: None, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: 20100101090000, PDS_KEYS['SED_HIGH_KEY']: None, PDS_KEYS['VALUE_KEY']: '6666666666'},
+        {PDS_KEYS['FROM_KEY']: None, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: 20100101090000, PDS_KEYS['SED_HIGH_KEY']: 20200101090000, PDS_KEYS['VALUE_KEY']: '5555555555'}
+      ]},
+      {PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '9999999999', PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: [
+        {PDS_KEYS['FROM_KEY']: None, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: 20120101090000, PDS_KEYS['SED_HIGH_KEY']: None, PDS_KEYS['VALUE_KEY']: '8888888888'},
+        {PDS_KEYS['FROM_KEY']: None, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: 20150101090000, PDS_KEYS['SED_HIGH_KEY']: 20200101090000, PDS_KEYS['VALUE_KEY']: '8888888888'}
+      ]},
+      {PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '1313131313', PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: [
+        {PDS_KEYS['FROM_KEY']: 20150101, PDS_KEYS['TO_KEY']: 20200101, PDS_KEYS['SED_LOW_KEY']: 20150101090000, PDS_KEYS['SED_HIGH_KEY']: 20200101090000, PDS_KEYS['VALUE_KEY']: '1212121212'}
+      ]},
+      {PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '1313131313', PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: [
+        {PDS_KEYS['FROM_KEY']: 20100101, PDS_KEYS['TO_KEY']: 20200101, PDS_KEYS['SED_LOW_KEY']: None, PDS_KEYS['SED_HIGH_KEY']: None, PDS_KEYS['VALUE_KEY']: '1414141414'}
+      ]},
+      {PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '1616161616', PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: [
+        {PDS_KEYS['FROM_KEY']: None, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: 20100101090000, PDS_KEYS['SED_HIGH_KEY']: 20200101090000, PDS_KEYS['VALUE_KEY']: '1515151515'}
+      ]},
+      {PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '1616161616', PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: [
+        {PDS_KEYS['FROM_KEY']: 20090101, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: None, PDS_KEYS['SED_HIGH_KEY']: 20200101090000, PDS_KEYS['VALUE_KEY']: '1515151515'}
+      ]},
+      {PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '1616161616', PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: [
+        {PDS_KEYS['FROM_KEY']: None, PDS_KEYS['TO_KEY']: 20200101, PDS_KEYS['SED_LOW_KEY']: 20080101090000, PDS_KEYS['SED_HIGH_KEY']: None, PDS_KEYS['VALUE_KEY']: '1515151515'}
+      ]}
     ],
-    StructType([
-      StructField('nhs_number', StringType()),
-      StructField('replacementOf', ArrayType(
-        StructType([
-          StructField('from', IntegerType()),
-          StructField('to', IntegerType()),
-          StructField(PDS_KEYS['SED_LOW_KEY'], StringType()),
-          StructField(PDS_KEYS['SED_HIGH_KEY'], StringType()),
-          StructField('value', StringType())
-        ])
-      ))
-    ])
+    PDS_FULL_SCHEMA
   )
   
   df_expected = spark.createDataFrame(
@@ -936,7 +1046,7 @@ superseded_nhs_number_flag_suite.run()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # NHS_NUMBER_HISTORY_LIST
+# MAGIC ## NHS_NUMBER_HISTORY_LIST
 
 # COMMAND ----------
 
@@ -965,47 +1075,36 @@ def nhs_number_history_list_tests():
   
   df_pds_full = spark.createDataFrame(
     [
-      ('4444444444', [
-        {'from': None, 'to': None, PDS_KEYS['SED_LOW_KEY']: 20100101090000, 'value': '1111111111'},
-        {'from': None, 'to': None, PDS_KEYS['SED_LOW_KEY']: 20090101090000, 'value': '2222222222'},
-        {'from': None, 'to': None, PDS_KEYS['SED_LOW_KEY']: 20080101090000, 'value': '3333333333'}
-      ]),
-      ('8888888888', [
-        {'from': None, 'to': None, PDS_KEYS['SED_LOW_KEY']: 20150101090000, 'value': '7777777777'},
-        {'from': None, 'to': None, PDS_KEYS['SED_LOW_KEY']: 20090101090000, 'value': '5555555555'},
-        {'from': None, 'to': None, PDS_KEYS['SED_LOW_KEY']: 20120101090000, 'value': '6666666666'}
-      ]),
-      ('1010101010', [
-        {'from': None, 'to': None, PDS_KEYS['SED_LOW_KEY']: 20100101090000, 'value': '9999999999'},
-        {'from': None, 'to': None, PDS_KEYS['SED_LOW_KEY']: 20090101090000, 'value': '9999999999'}
-      ]),
-      ('1212121212', [
-        {'from': None, 'to': None, PDS_KEYS['SED_LOW_KEY']: 20100101090000, 'value': 'ABCD111111'},
-        {'from': None, 'to': None, PDS_KEYS['SED_LOW_KEY']: 20090101090000, 'value': 'ABCD222222'}
-      ]),
-      ('1717171717', [
-        {'from': 20100101, 'to': None, PDS_KEYS['SED_LOW_KEY']: 20100101090000, 'value': '1414141414'},
-        {'from': 20090101, 'to': None, PDS_KEYS['SED_LOW_KEY']: None, 'value': '1515151515'}
-      ]),
-      ('1717171717', [
-        {'from': None, 'to': None, PDS_KEYS['SED_LOW_KEY']: 20080101090000, 'value': '1616161616'}
-      ]),
-      ('1919191919', [
-        {'from': None, 'to': None, PDS_KEYS['SED_LOW_KEY']: None, 'value': '1818181818'}
-      ])
+      {PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '4444444444', PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: [
+        {PDS_KEYS['FROM_KEY']: None, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: 20100101090000, PDS_KEYS['VALUE_KEY']: '1111111111'},
+        {PDS_KEYS['FROM_KEY']: None, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: 20090101090000, PDS_KEYS['VALUE_KEY']: '2222222222'},
+        {PDS_KEYS['FROM_KEY']: None, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: 20080101090000, PDS_KEYS['VALUE_KEY']: '3333333333'}
+      ]},
+      {PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '8888888888', PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: [
+        {PDS_KEYS['FROM_KEY']: None, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: 20150101090000, PDS_KEYS['VALUE_KEY']: '7777777777'},
+        {PDS_KEYS['FROM_KEY']: None, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: 20090101090000, PDS_KEYS['VALUE_KEY']: '5555555555'},
+        {PDS_KEYS['FROM_KEY']: None, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: 20120101090000, PDS_KEYS['VALUE_KEY']: '6666666666'}
+      ]},
+      {PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '1010101010', PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: [
+        {PDS_KEYS['FROM_KEY']: None, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: 20100101090000, PDS_KEYS['VALUE_KEY']: '9999999999'},
+        {PDS_KEYS['FROM_KEY']: None, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: 20090101090000, PDS_KEYS['VALUE_KEY']: '9999999999'}
+      ]},
+      {PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '1212121212', PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: [
+        {PDS_KEYS['FROM_KEY']: None, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: 20100101090000, PDS_KEYS['VALUE_KEY']: 'ABCD111111'},
+        {PDS_KEYS['FROM_KEY']: None, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: 20090101090000, PDS_KEYS['VALUE_KEY']: 'ABCD222222'}
+      ]},
+      {PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '1717171717', PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: [
+        {PDS_KEYS['FROM_KEY']: 20100101, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: 20100101090000, PDS_KEYS['VALUE_KEY']: '1414141414'},
+        {PDS_KEYS['FROM_KEY']: 20090101, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: None, PDS_KEYS['VALUE_KEY']: '1515151515'}
+      ]},
+      {PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '1717171717', PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: [
+        {PDS_KEYS['FROM_KEY']: None, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: 20080101090000, PDS_KEYS['VALUE_KEY']: '1616161616'}
+      ]},
+      {PDS_SCHEMA['NHS_NUMBER_COL']['NAME']: '1919191919', PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME']: [
+        {PDS_KEYS['FROM_KEY']: None, PDS_KEYS['TO_KEY']: None, PDS_KEYS['SED_LOW_KEY']: None, PDS_KEYS['VALUE_KEY']: '1818181818'}
+      ]}
     ],
-    StructType([
-      StructField('nhs_number', StringType()),
-      StructField('replacementOf', ArrayType(
-        StructType([
-          StructField('from', IntegerType()),
-          StructField('to', IntegerType()),
-          StructField(PDS_KEYS['SED_LOW_KEY'], StringType()),
-          StructField(PDS_KEYS['SED_HIGH_KEY'], StringType()),
-          StructField('value', StringType())
-        ])
-      ))
-    ])
+    PDS_FULL_SCHEMA
   )
   
   df_expected = spark.createDataFrame(
@@ -1028,189 +1127,15 @@ def nhs_number_history_list_tests():
     ])
   )
   
-  df_output = add_nhs_number_history_list(df_input, df_pds_full, excludeSensitiveRecords=False)
+  df_output = add_nhs_number_history_list(df_input, df_pds_full)
   assert compare_results(df_output, df_expected, join_columns = [UNIQUE_REFERENCE_COL], allow_nullable_schema_mismatch = True) # allow_nullable_schema_mismatch ensures backwards compatibility
 
-  
-@nhs_number_history_list_suite.add_test
-def nhs_number_history_list_sensitive_tests():
-  df_input = spark.createDataFrame(
-    [
-      ('1', datetime(2010, 7, 1), 20100701, '4444444444', False),
-      ('2', datetime(2010, 7, 1), 20100701, '4444444444', True)
-    ],
-    StructType([
-       StructField(UNIQUE_REFERENCE_COL, StringType()),
-       StructField(REQ_CREATED_COL, TimestampType()),
-       StructField(REQ_AS_AT_DATE_COL, IntegerType()),
-       StructField(RES_MATCHED_NHS_NO_COL, StringType()),
-       StructField(SENSITIVE_FLAG_COL, BooleanType())
-    ])
-  )
-
-  df_pds_full = spark.createDataFrame(
-    [
-      ('4444444444', [{'from': 20100101, 'to': None, PDS_KEYS['SED_LOW_KEY']: 20100101090000, 'value': '1111111111'}, 
-                      {'from': 20090101, 'to': None, PDS_KEYS['SED_LOW_KEY']: None, 'value': '2222222222'}, 
-                      {'from': None, 'to': None, PDS_KEYS['SED_LOW_KEY']: 20080101090000, 'value': '3333333333'}],
-                     [{'code': 'I'}],       
-                     [{'code': 'I'}]),
-      ('1111111111', [], [{'code': 'I'}], [{'code': 'I'}]),
-      ('2222222222', [], [{'code': 'I'}], [{'code': 'I'}, {'code': 'S'}]),
-      ('3333333333', [], [{'code': 'S'}], [{'code': 'S'}]),
-    ],
-    StructType([
-      StructField('nhs_number', StringType()),
-      StructField('replacementOf', ArrayType(
-        StructType([
-          StructField('from', IntegerType()),
-          StructField('to', IntegerType()),
-          StructField(PDS_KEYS['SED_LOW_KEY'], StringType()),
-          StructField(PDS_KEYS['SED_HIGH_KEY'], StringType()),
-          StructField('value', StringType())
-        ])
-      )),
-      StructField('confidentialityCode', ArrayType(StructType([StructField('code', StringType())]))),
-      StructField('confidentialityCode_history', ArrayType(StructType([StructField('code', StringType())])))
-    ])
-  )
-
-  df_expected = spark.createDataFrame(
-    [
-      ('1', datetime(2010, 7, 1), 20100701, '4444444444', False, ['1111111111']), # '2222222222' and '3333333333' are not listed because they are or were sensitive
-      ('2', datetime(2010, 7, 1), 20100701, '4444444444', True, []) # no history is returned because the record itself was sensitive
-
-    ],
-    StructType([
-      StructField(UNIQUE_REFERENCE_COL, StringType()),
-      StructField(REQ_CREATED_COL, TimestampType()),
-      StructField(REQ_AS_AT_DATE_COL, IntegerType()),
-      StructField(RES_MATCHED_NHS_NO_COL, StringType()),
-      StructField(SENSITIVE_FLAG_COL, BooleanType()),
-      StructField(NHS_NUMBER_HISTORY_LIST_COL, ArrayType(StringType(), True), True)
-    ])
-  )
-
-  df_output = add_nhs_number_history_list(df_input, df_pds_full, excludeSensitiveRecords=True)
-  assert compare_results(df_output, df_expected, join_columns = [UNIQUE_REFERENCE_COL], allow_nullable_schema_mismatch = True) # allow_nullable_schema_mismatch flag ensures backwards compatibility 
-
-  
-@nhs_number_history_list_suite.add_test
-def nhs_number_history_list_sensitive_flag_off_tests():
-  df_input = spark.createDataFrame(
-    [
-      ('1', datetime(2010, 7, 1), 20100701, '4444444444', False),
-      ('2', datetime(2010, 7, 1), 20100701, '4444444444', True)
-    ],
-    StructType([
-       StructField(UNIQUE_REFERENCE_COL, StringType()),
-       StructField(REQ_CREATED_COL, TimestampType()),
-       StructField(REQ_AS_AT_DATE_COL, IntegerType()),
-       StructField(RES_MATCHED_NHS_NO_COL, StringType()),
-       StructField(SENSITIVE_FLAG_COL, BooleanType())
-    ])
-  )
-
-  df_pds_full = spark.createDataFrame(
-    [
-      ('4444444444', [{'from': 20100101, 'to': None, PDS_KEYS['SED_LOW_KEY']: 20100101090000, 'value': '1111111111'}, 
-                      {'from': 20090101, 'to': None, PDS_KEYS['SED_LOW_KEY']: None, 'value': '2222222222'}, 
-                      {'from': None, 'to': None, PDS_KEYS['SED_LOW_KEY']: 20080101090000, 'value': '3333333333'}],
-                     [{'code': 'I'}],       
-                     [{'code': 'I'}]),
-      ('1111111111', [], [{'code': 'I'}], [{'code': 'I'}]),
-      ('2222222222', [], [{'code': 'I'}], [{'code': 'I'}, {'code': 'S'}]),
-      ('3333333333', [], [{'code': 'S'}], [{'code': 'S'}]),
-    ],
-    StructType([
-      StructField('nhs_number', StringType()),
-      StructField('replacementOf', ArrayType(
-        StructType([
-          StructField('from', IntegerType()),
-          StructField('to', IntegerType()),
-          StructField(PDS_KEYS['SED_LOW_KEY'], StringType()),
-          StructField(PDS_KEYS['SED_HIGH_KEY'], StringType()),
-          StructField('value', StringType())
-        ])
-      )),
-      StructField('confidentialityCode', ArrayType(StructType([StructField('code', StringType())]))),
-      StructField('confidentialityCode_history', ArrayType(StructType([StructField('code', StringType())])))
-    ])
-  )
-
-  df_expected = spark.createDataFrame(
-    [
-      ('1', datetime(2010, 7, 1), 20100701, '4444444444', False, ['3333333333', '2222222222', '1111111111']), # '2222222222' and '3333333333' are listed even though they are senstive because excludeSensitiveRecords=False
-      ('2', datetime(2010, 7, 1), 20100701, '4444444444', True, ['3333333333', '2222222222', '1111111111']) # history is returned even though the record is senstive because excludeSensitiveRecords=False
-
-    ],
-    StructType([
-      StructField(UNIQUE_REFERENCE_COL, StringType()),
-      StructField(REQ_CREATED_COL, TimestampType()),
-      StructField(REQ_AS_AT_DATE_COL, IntegerType()),
-      StructField(RES_MATCHED_NHS_NO_COL, StringType()),
-      StructField(SENSITIVE_FLAG_COL, BooleanType()),
-      StructField(NHS_NUMBER_HISTORY_LIST_COL, ArrayType(StringType(), False), True)
-    ])
-  )
-
-  df_output = add_nhs_number_history_list(df_input, df_pds_full, excludeSensitiveRecords=False)
-  assert compare_results(df_output, df_expected, join_columns = [UNIQUE_REFERENCE_COL], allow_nullable_schema_mismatch = True) # allow_nullable_schema_mismatch ensures backwards compatibility
-  
 nhs_number_history_list_suite.run()
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # SENSITIVE_FLAG
-
-# COMMAND ----------
-
-sensitive_flag_suite = FunctionTestSuite()
-
-@sensitive_flag_suite.add_test
-def all_sensitive_flag_tests():
-  df_input = spark.createDataFrame(
-    [
-      (1, 'S'),
-      (2, 'I'),
-      (3, 'Y'),
-      (4, 'N'),
-      (5, 'B'),
-      (6, None)
-    ],
-    StructType([
-        StructField('id', IntegerType()),
-        StructField(RES_SENSITIVITY_FLAG_COL, StringType()),
-    ])
-  )
-
-  df_expected = spark.createDataFrame(
-    [
-      (1, 'S', True),
-      (2, 'I', True),
-      (3, 'Y', True),
-      (4, 'N', False),
-      (5, 'B', False),
-      (6, None, False)
-    ],
-    StructType([
-        StructField('id', IntegerType()),
-        StructField(RES_SENSITIVITY_FLAG_COL, StringType()),
-        StructField(SENSITIVE_FLAG_COL, BooleanType())
-    ])
-  )
-
-  df_output = add_sensitive_flag(df_input)
-  assert compare_results(df_output, df_expected, join_columns = ['id'])
-  
-  
-sensitive_flag_suite.run()
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC # MULTIPLE_PDS_MATCHES_FLAG
+# MAGIC ## MULTIPLE_PDS_MATCHES_FLAG
 
 # COMMAND ----------
 
@@ -1248,7 +1173,7 @@ multiple_pds_matches_flag_suite.run()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # MULTIPLE_MPS_ID_MATCHES_FLAG
+# MAGIC ## MULTIPLE_MPS_ID_MATCHES_FLAG
 
 # COMMAND ----------
 
@@ -1290,7 +1215,7 @@ multiple_mps_id_matches_flag_suite.run()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC #MPS_MATCH_SCORE
+# MAGIC ##MPS_MATCH_SCORE
 
 # COMMAND ----------
 
@@ -1340,7 +1265,7 @@ mps_match_score_suite.run()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # MPS_ALGORITHMIC_MATCH_SCORE
+# MAGIC ## MPS_ALGORITHMIC_MATCH_SCORE
 
 # COMMAND ----------
 
@@ -1367,8 +1292,8 @@ def test_mps_algorithmic_match_score():
 
   df_expected = spark.createDataFrame(
     [
-      (1, Decimal(10), Decimal(20), Decimal(30), Decimal(40), Decimal(50.55), (Decimal(10), Decimal(20), Decimal(30), Decimal(40), Decimal(50.55))),
-      (2, None, None, None, Decimal(0), Decimal(0), (None, None, None, Decimal(0), Decimal(0)))
+      (1, Decimal(10), Decimal(20), Decimal(30), Decimal(40), Decimal(50.55), Decimal(10), Decimal(20), Decimal(30), Decimal(40), Decimal(50.55)),
+      (2, None, None, None, Decimal(0), Decimal(0), None, None, None, Decimal(0), Decimal(0))
     ],
     StructType([
         StructField('id', IntegerType(), False),
@@ -1377,14 +1302,11 @@ def test_mps_algorithmic_match_score():
         StructField(RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL, DecimalType(5,2), True),
         StructField(RES_ALGORITHMIC_TRACE_GENDER_SCORE_PERC_COL, DecimalType(5,2), True),
         StructField(RES_ALGORITHMIC_TRACE_POSTCODE_SCORE_PERC_COL, DecimalType(5,2), True),
-        StructField(MPS_ALGORITHMIC_MATCH_SCORE_COL, 
-                    StructType([
-                      StructField(FAMILYNAME_COL, DecimalType(5,2), True),
-                      StructField(GIVENNAME_COL, DecimalType(5,2), True),
-                      StructField(DATEOFBIRTH_COL, DecimalType(5,2), True),
-                      StructField(GENDER_COL, DecimalType(5,2), True),
-                      StructField(POSTCODE_COL, DecimalType(5,2), True)
-                    ]))
+        StructField(FAMILYNAME_ALGORITHMIC_MATCH_SCORE_COL, DecimalType(5,2), True),
+        StructField(GIVENNAME_ALGORITHMIC_MATCH_SCORE_COL, DecimalType(5,2), True),
+        StructField(DATEOFBIRTH_ALGORITHMIC_MATCH_SCORE_COL, DecimalType(5,2), True),
+        StructField(GENDER_ALGORITHMIC_MATCH_SCORE_COL, DecimalType(5,2), True),
+        StructField(POSTCODE_ALGORITHMIC_MATCH_SCORE_COL, DecimalType(5,2), True)
       ])
   )
   
