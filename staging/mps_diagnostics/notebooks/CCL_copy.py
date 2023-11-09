@@ -1,9 +1,18 @@
 # Databricks notebook source
+# MAGIC %md
+# MAGIC This notebook contains copies of functions that can be found in the NHS Digital Common Code Library (NHSDCCL).
+# MAGIC 
+# MAGIC We also import util from nhsdccl, but in these cases a small amendment is needed for our particular purposes.
+
+# COMMAND ----------
+
 import unittest
 from typing import *
 from functools import wraps
-from pyspark.sql import DataFrame
+from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
+from pyspark.sql.types import StructType
+from nhsdccl import util
 
 # COMMAND ----------
 
@@ -100,6 +109,7 @@ def check_schemas_match(df1: DataFrame,
   If allow_nullable_schema_mismatch is False then the nullability of the columns must also match.
   If True, nullability isn't included in the check.
   
+  This differs from NHSDCCL. 
   In line 30, comparison must be between typeNames because the dataType of arrays specifices nullability
   (so to ignore nullability, we have to disregard this info and just focus on typeName).
   N.B. This means that the elementType of arrays is also disregarded.
@@ -190,3 +200,57 @@ def compare_results(df1: DataFrame,
   else:
     print('Schema mismatch.')
     return False
+
+# COMMAND ----------
+
+def create_partitioned_table(spark: SparkSession, df: DataFrame, partition_by: str, db_or_asset: str,
+                            table: str = None,
+                            overwrite: bool = False,
+                            owner: str = None):
+  """
+  This differs from the NHSDCCL function create_table, in that it also partitions the table.
+  """
+  if table is None:
+    asset_name = db_or_asset
+  else:
+    asset_name = f'{db_or_asset}.{table}'
+  
+  if overwrite:
+    df.write.partitionBy(partition_by).saveAsTable(asset_name, mode='overwrite')
+  else:
+    df.write.partitionBy(partition_by).saveAsTable(asset_name)
+    
+  if owner:
+    spark.sql(f'ALTER TABLE {asset_name} OWNER TO `{owner}`')
+
+# COMMAND ----------
+
+def create_partitioned_table_from_schema(spark, partition_by: str, schema: StructType, db_or_asset: str, table: str = None, overwrite: bool = False, 
+                                        allow_nullable_schema_mismatch: bool = False):
+  """
+  This differs from the NHSDCCL function create_table_from_schema, in that it also partitions the table.
+  """
+  
+  if table is None:
+    db = db_or_asset.split('.')[0]
+    table = db_or_asset.split('.')[1]
+    asset_name = db_or_asset
+  else:
+    db = db_or_asset
+    asset_name = f'{db}.{table}'
+    
+  df_new = spark.createDataFrame([], schema)
+  
+  if util.table_exists(spark, db, table):
+    if overwrite:
+      util.drop_table(spark, db, table)
+      create_partitioned_table(spark, df_new, partition_by, db, table)
+    else:
+      df_existing = spark.table(asset_name)
+      if check_schemas_match(df_existing, df_new,
+                             allow_nullable_schema_mismatch=allow_nullable_schema_mismatch) is False:
+        raise AssertionError(f'The given new schema does not match the existing schema, and overwrite is set '
+                             f'to False.\nExisting: {df_existing.schema.json()}\nNew     : '
+                             f'{df_new.schema.json()}')
+  else:
+    create_partitioned_table(spark, df_new, partition_by, db, table)

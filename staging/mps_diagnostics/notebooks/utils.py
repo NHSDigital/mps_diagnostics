@@ -1,10 +1,25 @@
 # Databricks notebook source
+# MAGIC %md
+# MAGIC This notebook contains all the functions used by the pipeline.
+# MAGIC 
+# MAGIC The functions are called from the "main" notebook.
+# MAGIC 
+# MAGIC The first few functions are utilities:
+# MAGIC - remove_duplicate_request_response_records
+# MAGIC - filter_for_new_records
+# MAGIC - dt_merge_unique
+# MAGIC - validate_schema
+# MAGIC 
+# MAGIC And the remaining functions are derivation logic for adding each of the mps diagnostics columns.
+
+# COMMAND ----------
+
 # MAGIC %run ./imports
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC #Disambiguating the mps_archive data set
+# MAGIC ##DISAMBIGUATE THE MPS_ARCHIVE DATA SET
 
 # COMMAND ----------
 
@@ -42,7 +57,7 @@ def remove_duplicate_request_response_records(df_requests_and_responses:DataFram
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # FILTER FOR NEW RECORDS
+# MAGIC ## FILTER FOR NEW RECORDS
 
 # COMMAND ----------
 
@@ -70,208 +85,42 @@ def filter_for_new_records(df_requests_and_responses: DataFrame, df_mps_diagnost
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # PERSON_ID
+# MAGIC ## MERGE NEW RECORDS
 
 # COMMAND ----------
 
-# For live data this would be added by the DPS pipeline. But we need this function for mps archive data.
-
-def add_person_id(df_requests_and_responses:DataFrame) -> DataFrame:
-  df_requests_and_responses = df_requests_and_responses.withColumn(PERSON_ID_COL,
-                                         F.when(
-                                           ~(F.col(RES_MATCHED_NHS_NO_COL) == '') &
-                                           ~(F.col(RES_MATCHED_NHS_NO_COL).isNull()) &
-                                           ~(F.col(RES_MATCHED_NHS_NO_COL) == '0000000000') &
-                                           ~(F.col(RES_MATCHED_NHS_NO_COL) == '9999999999'),
-                                           F.col(RES_MATCHED_NHS_NO_COL)
-                                         )
-                                         .when(
-                                           ~(F.col(RES_MPS_ID_COL) == '') &
-                                           ~(F.col(RES_MPS_ID_COL).isNull()),
-                                           F.split(F.col(RES_MPS_ID_COL), '~~~').getItem(0)
-                                         )
-                                         .otherwise('U')
-                                         .cast(StringType())
-                                        )
-  return df_requests_and_responses
-
-# For a fake one-time-use ID we can just use 'U' for our purposes. But we could add random numbers too to make it look like real data.
-
-# Subject to invstigation, we're not sure if 9999999999 and MPS_ID are both present would person Id be the MPS_ID?
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC # PERSON_ID_TYPE
-
-# COMMAND ----------
-
-# NHS number is 10 digits
-
-def add_person_id_type(df_requests_and_responses:DataFrame) -> DataFrame:
+def dt_merge_unique(database, target_table, df_source):
   '''
-  Adds a derived field to show which of the three person ID types has been output by MPS.
-  - NHSNUMBER: if one is returned from PDS live or cached.
-  - MPS_ID: from the MPS record bucket, or created new if the minimum required fields are present for an MPS_ID.
-  - ONE_TIME_USE_ID: if neither of the above was found.
-  '''
-  df_requests_and_responses = df_requests_and_responses.withColumn(PERSON_ID_TYPE_COL,
-                                         F.when(
-                                           F.col(PERSON_ID_COL).rlike("^[0-9]{10}$"),
-                                           'NHSNUMBER'
-                                         )
-                                         .when(
-                                           F.col(PERSON_ID_COL).startswith('U'),
-                                           'ONE_TIME_USE_ID'
-                                         )
-                                         .when(
-                                           (F.col(PERSON_ID_COL).startswith('A')) |
-                                           (F.col(PERSON_ID_COL).startswith('B')),
-                                           'MPS_ID'
-                                         )
-                                         .otherwise(None)
-                                         .cast(StringType())
-                                        )
-  return df_requests_and_responses
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC # MPS_LAST_STEP_ATTEMPTED
-
-# COMMAND ----------
-
-def add_mps_last_step_attempted(df_requests_and_responses:DataFrame) -> DataFrame:
-  '''
-  Adds the name of the last trace step attempted by MPS.
-  Only includes the trace steps which look for a matching NHS number in PDS. Does not include whether MPS_ID matching was attempted.
-  - CCT cached
-  - CCT live
-  - Alphanumeric trace
-  - Algorithmic trace
-  - No PDS tracing run
-  '''
-  df_requests_and_responses = df_requests_and_responses.withColumn(MPS_LAST_STEP_ATTEMPTED_COL,
-                                         F.when(
-                                           (F.col(RES_MATCHED_ALGORITHM_INDICATOR_COL) == 1) &
-                                           (F.col(RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL).isNull()),
-                                           'CCT_cached'
-                                         )
-                                         .when(
-                                           (F.col(RES_MATCHED_ALGORITHM_INDICATOR_COL) == 1) &
-                                           (F.col(RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL) == 0),
-                                           'CCT_live'
-                                         )
-                                         .when(
-                                           F.col(RES_MATCHED_ALGORITHM_INDICATOR_COL) == 3,
-                                           'alphanumeric_trace_live'
-                                         )
-                                         .when(
-                                           F.col(RES_MATCHED_ALGORITHM_INDICATOR_COL) == 4,
-                                           'algorithmic_trace_live'
-                                         )
-                                         .when(
-                                           F.col(RES_MATCHED_ALGORITHM_INDICATOR_COL) == 0,
-                                           'No_PDS_tracing_run'
-                                         )
-                                         .otherwise(None)
-                                         .cast(StringType())
-                                        )
-  return df_requests_and_responses
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC # MPS_SUCCESSFUL_STEP
-
-# COMMAND ----------
-
-def add_mps_successful_step(df_requests_and_responses:DataFrame) -> DataFrame:
-  '''
-  Shows the name of the successful trace step where MPS has matched to an NHS number. The trace steps are:
-  - CCT cached
-  -CCT live
-  -Alphanumeric trace live
-  -Algorithmic trace live
-  -Not applicable (no trace step attempted or no match found)
-  '''
-  df_requests_and_responses = df_requests_and_responses.withColumn(MPS_SUCCESSFUL_STEP_COL,
-                                           F.when(
-                                             (F.col(RES_MATCHED_ALGORITHM_INDICATOR_COL) == 1) & 
-                                             (F.col(RES_MATCHED_CONFIDENCE_PERCENTAGE_COL) == 100) & 
-                                             (F.col(RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL).isNull()), 'CCT_cached'
-                                           )
-                                          .when(
-                                            (F.col(RES_MATCHED_ALGORITHM_INDICATOR_COL) == 1) & 
-                                            (F.col(RES_MATCHED_CONFIDENCE_PERCENTAGE_COL) == 100) & 
-                                            (F.col(RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL) == 0), 'CCT_live'
-                                          )
-                                          .when(                                            
-                                            (F.col(RES_MATCHED_ALGORITHM_INDICATOR_COL) == 3) & 
-                                            (F.col(RES_MATCHED_CONFIDENCE_PERCENTAGE_COL) == 100), 'alphanumeric_trace_live'
-                                          )
-                                          .when(
-                                            (F.col(RES_MATCHED_ALGORITHM_INDICATOR_COL) == 4) & 
-                                            (F.col(RES_MATCHED_CONFIDENCE_PERCENTAGE_COL) >= 50), 'algorithmic_trace_live'
-                                          )
-                                          .when(
-                                            (F.col(RES_MATCHED_ALGORITHM_INDICATOR_COL) == 0), 'No_PDS_tracing_run'
-                                          ) 
-                                          .when(
-                                            (F.col(RES_MATCHED_ALGORITHM_INDICATOR_COL) != 0) & 
-                                            (F.col(RES_MATCHED_CONFIDENCE_PERCENTAGE_COL) == 0), 'No_PDS_match_found'
-                                          )                                      
-                                          .otherwise(None)
-                                          .cast(StringType())
-                                         )
+  Merge data from a source dataframe to a target delta table on LOCAL_ID_COL and UNIQUE_REFERENCE_COL.
   
-  return df_requests_and_responses
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC # PDS_MATCH_FLAG
-
-# COMMAND ----------
-
-def add_pds_match_flag(df_requests_and_responses:DataFrame) -> DataFrame:
+  If any duplicates are present, use the source data.
   '''
-  Flags if a match was made to an NHS number from PDS. 
-  '''
-  df_requests_and_responses = df_requests_and_responses.withColumn(PDS_MATCH_FLAG_COL,
-                                                                   F.when(
-                                                                     (F.col(PERSON_ID_TYPE_COL) == 'NHSNUMBER'), True
-                                                                   )
-                                                                   .otherwise(False)
-                                                                  )
   
-  return df_requests_and_responses
+  # get delta tables and source dataframe
+  dt_target = DeltaTable.forName(spark, f'{database}.{target_table}')
+  
+  # construct merge update dictionary
+  dict_merge_update = {}
+  
+  for col in df_source.columns:
+    dict_merge_update[col] = f'source.{col}'
 
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC # SENSITIVE_FLAG
-
-# COMMAND ----------
-
-def add_sensitive_flag(df_requests_and_responses:DataFrame) -> DataFrame:
-  '''
-  Flags if a record is marked as sensitive , and returns a boolean
-  '''
-  df_requests_and_responses = (
-    df_requests_and_responses
-    .withColumn(SENSITIVE_FLAG_COL, 
-                F.when(F.col(RES_SENSITIVITY_FLAG_COL).isin(['S', 'Y', 'I']), True)
-                .otherwise(False)
-               )
+  # execute merge
+  (
+    dt_target
+    .alias('target')
+    .merge(df_source.alias('source'), f'target.{LOCAL_ID_COL} == source.{LOCAL_ID_COL} and target.{UNIQUE_REFERENCE_COL} == source.{UNIQUE_REFERENCE_COL}')
+    .whenMatchedUpdate(set = dict_merge_update)
+    .whenNotMatchedInsert(values = dict_merge_update) 
+    .execute()
   )
   
-  return df_requests_and_responses
+  return dt_target.toDF()
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # VALIDATE_SCHEMA
+# MAGIC ## VALIDATE_SCHEMA
 
 # COMMAND ----------
 
@@ -348,7 +197,184 @@ def schema_correct(df_schema_status):
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # SUPERSEDED_NHS_NUMBER_FLAG
+# MAGIC ## PERSON_ID
+
+# COMMAND ----------
+
+# For live data this would be added by the DPS pipeline. But we need this function for mps archive data.
+# For one time use IDs, we add "U" as a placeholder for further derivations and sanity checks, but it will be removed at the end of the pipeline so that users will see NULL and refer to the Person ID column they received from MPS instead.
+
+def add_person_id(df_requests_and_responses:DataFrame) -> DataFrame:
+  df_requests_and_responses = df_requests_and_responses.withColumn(PERSON_ID_COL,
+                                         F.when(
+                                           (F.col(RES_MATCHED_NHS_NO_COL) != '') &
+                                           (F.col(RES_MATCHED_NHS_NO_COL).isNotNull()) &
+                                           (F.col(RES_MATCHED_NHS_NO_COL) != '0000000000') &
+                                           (F.col(RES_MATCHED_NHS_NO_COL) != '9999999999'),
+                                           F.col(RES_MATCHED_NHS_NO_COL)
+                                         )
+                                         .when(
+                                           (F.col(RES_MPS_ID_COL) != '') &
+                                           (F.col(RES_MPS_ID_COL).isNotNull()),
+                                           F.split(F.col(RES_MPS_ID_COL), '~~~').getItem(0)
+                                         )
+                                         .otherwise('U') 
+                                         .cast(StringType())
+                                        )
+  return df_requests_and_responses
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## PERSON_ID_TYPE
+
+# COMMAND ----------
+
+# NHS number is 10 digits
+
+def add_person_id_type(df_requests_and_responses:DataFrame) -> DataFrame:
+  '''
+  Adds a derived field to show which of the three person ID types has been output by MPS.
+  - NHSNUMBER: if one is returned from PDS live or cached.
+  - MPS_ID: from the MPS record bucket, or created new if the minimum required fields are present for an MPS_ID.
+  - ONE_TIME_USE_ID: if neither of the above was found.
+  '''
+  df_requests_and_responses = df_requests_and_responses.withColumn(PERSON_ID_TYPE_COL,
+                                         F.when(
+                                           F.col(PERSON_ID_COL).rlike("^[0-9]{10}$"),
+                                           'NHSNUMBER'
+                                         )
+                                         .when(
+                                           F.col(PERSON_ID_COL).startswith('U'),
+                                           'ONE_TIME_USE_ID'
+                                         )
+                                         .when(
+                                           (F.col(PERSON_ID_COL).startswith('A')) |
+                                           (F.col(PERSON_ID_COL).startswith('B')),
+                                           'MPS_ID'
+                                         )
+                                         .otherwise(None)
+                                         .cast(StringType())
+                                        )
+  return df_requests_and_responses
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## MPS_LAST_STEP_ATTEMPTED
+
+# COMMAND ----------
+
+def add_mps_last_step_attempted(df_requests_and_responses:DataFrame) -> DataFrame:
+  '''
+  Adds the name of the last trace step attempted by MPS.
+  Only includes the trace steps which look for a matching NHS number in PDS. Does not include whether MPS_ID matching was attempted.
+  - CCT cached
+  - CCT live
+  - Alphanumeric trace
+  - Algorithmic trace
+  - No PDS tracing run
+  '''
+  df_requests_and_responses = df_requests_and_responses.withColumn(MPS_LAST_STEP_ATTEMPTED_COL,
+                                         F.when(
+                                           (F.col(RES_MATCHED_ALGORITHM_INDICATOR_COL) == 1) &
+                                           (F.col(RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL).isNull()),
+                                           'CCT_cached'
+                                         )
+                                         .when(
+                                           (F.col(RES_MATCHED_ALGORITHM_INDICATOR_COL) == 1) &
+                                           (F.col(RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL) == 0),
+                                           'CCT_live'
+                                         )
+                                         .when(
+                                           F.col(RES_MATCHED_ALGORITHM_INDICATOR_COL) == 3,
+                                           'alphanumeric_trace_live'
+                                         )
+                                         .when(
+                                           F.col(RES_MATCHED_ALGORITHM_INDICATOR_COL) == 4,
+                                           'algorithmic_trace_live'
+                                         )
+                                         .when(
+                                           F.col(RES_MATCHED_ALGORITHM_INDICATOR_COL) == 0,
+                                           'No_PDS_tracing_run'
+                                         )
+                                         .otherwise(None)
+                                         .cast(StringType())
+                                        )
+  return df_requests_and_responses
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## MPS_SUCCESSFUL_STEP
+
+# COMMAND ----------
+
+def add_mps_successful_step(df_requests_and_responses:DataFrame) -> DataFrame:
+  '''
+  Shows the name of the successful trace step where MPS has matched to an NHS number. The trace steps are:
+  - CCT cached
+  -CCT live
+  -Alphanumeric trace live
+  -Algorithmic trace live
+  -Not applicable (no trace step attempted or no match found)
+  '''
+  df_requests_and_responses = df_requests_and_responses.withColumn(MPS_SUCCESSFUL_STEP_COL,
+                                           F.when(
+                                             (F.col(RES_MATCHED_ALGORITHM_INDICATOR_COL) == 1) & 
+                                             (F.col(RES_MATCHED_CONFIDENCE_PERCENTAGE_COL) == 100) & 
+                                             (F.col(RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL).isNull()), 'CCT_cached'
+                                           )
+                                          .when(
+                                            (F.col(RES_MATCHED_ALGORITHM_INDICATOR_COL) == 1) & 
+                                            (F.col(RES_MATCHED_CONFIDENCE_PERCENTAGE_COL) == 100) & 
+                                            (F.col(RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL) == 0), 'CCT_live'
+                                          )
+                                          .when(                                            
+                                            (F.col(RES_MATCHED_ALGORITHM_INDICATOR_COL) == 3) & 
+                                            (F.col(RES_MATCHED_CONFIDENCE_PERCENTAGE_COL) == 100), 'alphanumeric_trace_live'
+                                          )
+                                          .when(
+                                            (F.col(RES_MATCHED_ALGORITHM_INDICATOR_COL) == 4) & 
+                                            (F.col(RES_MATCHED_CONFIDENCE_PERCENTAGE_COL) >= 50), 'algorithmic_trace_live'
+                                          )
+                                          .when(
+                                            (F.col(RES_MATCHED_ALGORITHM_INDICATOR_COL) == 0), 'No_PDS_tracing_run'
+                                          ) 
+                                          .when(
+                                            (F.col(RES_MATCHED_ALGORITHM_INDICATOR_COL) != 0) & 
+                                            (F.col(RES_MATCHED_CONFIDENCE_PERCENTAGE_COL) == 0), 'No_PDS_match_found'
+                                          )                                      
+                                          .otherwise(None)
+                                          .cast(StringType())
+                                         )
+  
+  return df_requests_and_responses
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## PDS_MATCH_FLAG
+
+# COMMAND ----------
+
+def add_pds_match_flag(df_requests_and_responses:DataFrame) -> DataFrame:
+  '''
+  Flags if a match was made to an NHS number from PDS. 
+  '''
+  df_requests_and_responses = df_requests_and_responses.withColumn(PDS_MATCH_FLAG_COL,
+                                                                   F.when(
+                                                                     (F.col(PERSON_ID_TYPE_COL) == 'NHSNUMBER'), True
+                                                                   )
+                                                                   .otherwise(False)
+                                                                  )
+  
+  return df_requests_and_responses
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## SUPERSEDED_NHS_NUMBER_FLAG
 
 # COMMAND ----------
 
@@ -359,32 +385,32 @@ def explode_pds_by_replacementof(df_pds_full) -> DataFrame:
   '''
   df_pds_exploded_by_replacementof = (
     df_pds_full
-    .select('nhs_number',
-            F.explode(F.col('replacementOf')).alias('replacementOf_exploded')
+    .select(PDS_SCHEMA['NHS_NUMBER_COL']['NAME'],
+            F.explode(F.col(PDS_SCHEMA['REPLACEMENT_OF_COL']['NAME'])).alias('replacementOf_exploded')
            )
     .withColumn('replacementOf_value',
-                F.col('replacementOf_exploded').getItem('value')
+                F.col('replacementOf_exploded').getItem(PDS_KEYS['VALUE_KEY'])
                )
     .withColumn('replacementOf_start_date',
                 F.when(F.col('replacementOf_exploded')[PDS_KEYS['SED_LOW_KEY']].isNotNull(),
-                       F.to_date(F.col('replacementOf_exploded').getItem(PDS_KEYS['SED_LOW_KEY']), 'yyyyMMddhhmmss')
+                       F.to_date(F.col('replacementOf_exploded').getItem(PDS_KEYS['SED_LOW_KEY']), 'yyyyMMddHHmmss')
                       )
-                .when(F.col('replacementOf_exploded')['from'].isNotNull(),
-                      F.to_date(F.col('replacementOf_exploded').getItem('from').cast('string'), 'yyyyMMdd')
+                .when(F.col('replacementOf_exploded')[PDS_KEYS['FROM_KEY']].isNotNull(),
+                      F.to_date(F.col('replacementOf_exploded').getItem(PDS_KEYS['FROM_KEY']).cast('string'), 'yyyyMMdd')
                      )
                 .otherwise(None)
                )
     .withColumn('replacementOf_end_date',
                 F.when(F.col('replacementOf_exploded')[PDS_KEYS['SED_HIGH_KEY']].isNotNull(),
-                       F.to_date(F.col('replacementOf_exploded').getItem(PDS_KEYS['SED_HIGH_KEY']), 'yyyyMMddhhmmss')
+                       F.to_date(F.col('replacementOf_exploded').getItem(PDS_KEYS['SED_HIGH_KEY']), 'yyyyMMddHHmmss')
                       )
-                .when(F.col('replacementOf_exploded')['to'].isNotNull(),
-                      F.to_date(F.col('replacementOf_exploded').getItem('to').cast('string'), 'yyyyMMdd')
+                .when(F.col('replacementOf_exploded')[PDS_KEYS['TO_KEY']].isNotNull(),
+                      F.to_date(F.col('replacementOf_exploded').getItem(PDS_KEYS['TO_KEY']).cast('string'), 'yyyyMMdd')
                      )
                 .otherwise(None)
                )
     .filter(F.col('replacementOf_value').rlike('^[0-9]{10}$'))
-    .select('nhs_number', 'replacementOf_value', 'replacementOf_start_date', 'replacementOf_end_date')
+    .select(PDS_SCHEMA['NHS_NUMBER_COL']['NAME'], 'replacementOf_value', 'replacementOf_start_date', 'replacementOf_end_date')
   )
             
   return df_pds_exploded_by_replacementof
@@ -401,7 +427,7 @@ def add_request_date_col(df_requests_and_responses) -> DataFrame:
     df_requests_and_responses
       .withColumn('request_date', 
                   F.when(F.col(REQ_AS_AT_DATE_COL).isNotNull(), F.to_date(F.col(REQ_AS_AT_DATE_COL).cast('string'), 'yyyyMMdd'))
-                  .when(F.col(REQ_CREATED_COL).isNotNull(), F.to_date(F.col(REQ_CREATED_COL), 'yyyy-MM-dd hh:mm:ss'))
+                  .when(F.col(REQ_CREATED_COL).isNotNull(), F.to_date(F.col(REQ_CREATED_COL), 'yyyy-MM-dd HH:mm:ss'))
                   .otherwise(None)
                )
   )
@@ -426,7 +452,7 @@ condition_request_nhs_no_matches_pds_replacement_of_value = (
 )
 
 condition_response_nhs_no_matches_pds_nhs_no = (
-  F.col(RES_MATCHED_NHS_NO_COL) == F.col('nhs_number')
+  F.col(RES_MATCHED_NHS_NO_COL) == F.col(PDS_SCHEMA['NHS_NUMBER_COL']['NAME'])
 )
 
 # COMMAND ----------
@@ -459,7 +485,7 @@ def add_superseded_nhs_number_flag(df_requests_and_responses:DataFrame, df_pds_f
       ),
       'left'    
     )
-    .withColumn('superseded_nhs_number_flag_this_exploded_row', F.col('nhs_number').isNotNull())
+    .withColumn('superseded_nhs_number_flag_this_exploded_row', F.col(PDS_SCHEMA['NHS_NUMBER_COL']['NAME']).isNotNull())
     .groupBy(df_requests_and_responses.schema.names)
     .agg(F.max(F.col('superseded_nhs_number_flag_this_exploded_row')).alias(SUPERSEDED_NHS_NUMBER_FLAG_COL))
   )
@@ -469,11 +495,11 @@ def add_superseded_nhs_number_flag(df_requests_and_responses:DataFrame, df_pds_f
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # NHS_NUMBER_HISTORY_LIST
+# MAGIC ## NHS_NUMBER_HISTORY_LIST
 
 # COMMAND ----------
 
-def add_nhs_number_history_list(df_requests_and_responses:DataFrame, df_pds_full:DataFrame, excludeSensitiveRecords=True) -> DataFrame:
+def add_nhs_number_history_list(df_requests_and_responses:DataFrame, df_pds_full:DataFrame) -> DataFrame:
   '''
   List all NHS numbers which are superseded by the NHS number in the response table.
   
@@ -485,28 +511,14 @@ def add_nhs_number_history_list(df_requests_and_responses:DataFrame, df_pds_full
   Create the list of nhs numbers by collecting the replacementOf values when windowing over the request and response columns and ordering by replacementOf_start_date.
   Group by all request and response columns (this also has the effect of dropping the PDS columns and the temporary "request_date" column). 
   Aggregate by the max of the nhs number history lists.
-  
-  If the excludeSensitiveRecords flag is set to True, all records that have ever been sensitive will be excluded from the NHS_NUMBER_HISTORY_LIST.
-  If the excludeSensitiveRecords flag is set to True, records which are currently sensitive (according to the sensitivity flag) will have their NHS_NUMBER_HISTORY_LIST hidden (empty list)
   '''
   
-  # Aliases are needed for df_pds_exploded_by_replacementof and df_sensitive_nhs_numbers because they both reference the same df_pds_full as their 'origins'. 
-  # Therefore when it comes to joining these two dataframes (if excludeSensitiveRecords == True), the columns in the join condition need to be specifically referenced 
-  # using each dataframe's alias. This is only needed for older versions of Spark, but ensures backwards-compatibility.
+  # An alias is needed for df_pds_exploded_by_replacementof because it references the same df_pds_full as its 'origin'. 
+  # Therefore when it comes to joining this dataframe, the columns in the join condition need to be specifically referenced 
+  # using its alias. This is only needed for older versions of Spark, but ensures backwards-compatibility.
   
   df_pds_exploded_by_replacementof = explode_pds_by_replacementof(df_pds_full).alias('df_pds_exploded_by_replacementof')
 
-  if excludeSensitiveRecords == True:
-    df_sensitive_nhs_numbers = df_pds_full.filter(F.array_contains(F.col('confidentialityCode_history.code'), 'S')).select('nhs_number').alias('df_sensitive_nhs_numbers')
-    df_pds_exploded_by_replacementof = (
-      df_pds_exploded_by_replacementof
-      .join(
-        df_sensitive_nhs_numbers, 
-        F.col('df_pds_exploded_by_replacementof.replacementOf_value') == F.col('df_sensitive_nhs_numbers.nhs_number'),
-        'left_anti'
-      )
-    )
-  
   w = Window.partitionBy(df_requests_and_responses.schema.names).orderBy('replacementOf_start_date')
 
   df_requests_and_responses = (
@@ -523,22 +535,13 @@ def add_nhs_number_history_list(df_requests_and_responses:DataFrame, df_pds_full
     .groupBy(df_requests_and_responses.schema.names)
     .agg(F.array_distinct(F.max(NHS_NUMBER_HISTORY_LIST_COL)).alias(NHS_NUMBER_HISTORY_LIST_COL))
   )
-  
-  if excludeSensitiveRecords == True:
-    df_requests_and_responses = (
-      df_requests_and_responses
-      .withColumn(NHS_NUMBER_HISTORY_LIST_COL, 
-            F.when(F.col(SENSITIVE_FLAG_COL) == True, F.array().cast(ArrayType(StringType())))
-            .otherwise(F.col(NHS_NUMBER_HISTORY_LIST_COL))
-           )
-    )
-  
+   
   return df_requests_and_responses
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # MULTIPLE_PDS_MATCHES_FLAG
+# MAGIC ## MULTIPLE_PDS_MATCHES_FLAG
 
 # COMMAND ----------
 
@@ -561,7 +564,7 @@ def add_multiple_pds_matches_flag(df_requests_and_responses:DataFrame) -> DataFr
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # MULTIPLE_MPS_ID_MATCHES_FLAG
+# MAGIC ## MULTIPLE_MPS_ID_MATCHES_FLAG
 
 # COMMAND ----------
 
@@ -584,14 +587,13 @@ def add_multiple_mps_id_matches_flag(df_requests_and_responses:DataFrame) -> Dat
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC #MPS_MATCH_SCORE
+# MAGIC ##MPS_MATCH_SCORE
 
 # COMMAND ----------
 
 def add_mps_match_score(df_requests_and_responses:DataFrame) -> DataFrame:
   '''
-  Current aggregated scoring for the query record based on which MPS decides the link.
-  
+  Copies the aggregated score given by MPS.
   This does not represent a probabilistic measure of confidence.
   '''
   df_requests_and_responses = df_requests_and_responses.withColumn(MPS_MATCH_SCORE_COL,
@@ -603,7 +605,7 @@ def add_mps_match_score(df_requests_and_responses:DataFrame) -> DataFrame:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # MPS_ALGORITHMIC_MATCH_SCORE
+# MAGIC ## MPS_ALGORITHMIC_MATCH_SCORE
 
 # COMMAND ----------
 
@@ -611,46 +613,13 @@ def add_mps_algorithmic_match_score(df_requests_and_responses:DataFrame) -> Data
   '''
   Copies the scoring given by MPS algorithmic trace to each demographic attribute.
   '''
-  df_requests_and_responses = df_requests_and_responses.withColumn(MPS_ALGORITHMIC_MATCH_SCORE_COL,
-                                                                   F.struct(
-                                                                     [
-                                                                       F.col(RES_ALGORITHMIC_TRACE_FAMILY_NAME_SCORE_PERC_COL).cast(DecimalType(5,2)).alias(FAMILYNAME_COL),
-                                                                       F.col(RES_ALGORITHMIC_TRACE_GIVEN_NAME_SCORE_PERC_COL).cast(DecimalType(5,2)).alias(GIVENNAME_COL),
-                                                                       F.col(RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL).cast(DecimalType(5,2)).alias(DATEOFBIRTH_COL),
-                                                                       F.col(RES_ALGORITHMIC_TRACE_GENDER_SCORE_PERC_COL).cast(DecimalType(5,2)).alias(GENDER_COL),
-                                                                       F.col(RES_ALGORITHMIC_TRACE_POSTCODE_SCORE_PERC_COL).cast(DecimalType(5,2)).alias(POSTCODE_COL)
-                                                                     ]
-                                                                   )
-                                                                  )
-  
-  return df_requests_and_responses
-
-# COMMAND ----------
-
-# MAGIC %md #Preprocessing the request_response data set
-
-# COMMAND ----------
-
-def format_schemas(df_requests_and_responses:DataFrame) -> DataFrame:
-  '''
-  There is a mismatch between datatypes for the source and target df_requests_and_responses. Specifically, the following fields need to be forced into the desired datatype:
-    req_AS_AT_DATE: IntegerType --> DateType
-    res_AS_AT_DATE: IntegerType --> DateType
-    MPS_MATCH_SCORE: DoubleType --> DecimalType(5,2)
-    PDS_MATCH_FLAG: (nullable) false --> true
-    MULTIPLE_PDS_MATCHES_FLAG: (nullable) false --> true
-    MULTIPLE_MPS_ID_MATCHES_FLAG: (nullable) false --> true
-    MPS_ALGORITHMIC_MATCH_SCORE: (nullable) false --> true
-    MPS_DIAGNOSTICS_TIMESTAMP: (nullable) false --> true
-  '''
   df_requests_and_responses = (
     df_requests_and_responses
-    .withColumn('req_AS_AT_DATE', F.to_date(F.col('req_AS_AT_DATE').cast('string')))
-    .withColumn('res_AS_AT_DATE', F.to_date(F.col('res_AS_AT_DATE').cast('string')))
-    .withColumn('PDS_MATCH_FLAG', F.when(F.col('PDS_MATCH_FLAG').isNotNull(), F.col('PDS_MATCH_FLAG')).otherwise(F.lit(None)))
-    .withColumn('MULTIPLE_PDS_MATCHES_FLAG', F.when(F.col('MULTIPLE_PDS_MATCHES_FLAG').isNotNull(), F.col('MULTIPLE_PDS_MATCHES_FLAG')).otherwise(F.lit(None)))
-    .withColumn('MULTIPLE_MPS_ID_MATCHES_FLAG', F.when(F.col('MULTIPLE_MPS_ID_MATCHES_FLAG').isNotNull(), F.col('MULTIPLE_MPS_ID_MATCHES_FLAG')).otherwise(F.lit(None)))
-    .withColumn('MPS_ALGORITHMIC_MATCH_SCORE', F.when(F.col('MPS_ALGORITHMIC_MATCH_SCORE').isNotNull(), F.col('MPS_ALGORITHMIC_MATCH_SCORE')).otherwise(F.lit(None)))
-    .withColumn('MPS_DIAGNOSTICS_TIMESTAMP', F.when(F.col('MPS_DIAGNOSTICS_TIMESTAMP').isNotNull(), F.col('MPS_DIAGNOSTICS_TIMESTAMP')).otherwise(F.lit(None)))
-  )
+    .withColumn(FAMILYNAME_ALGORITHMIC_MATCH_SCORE_COL, F.col(RES_ALGORITHMIC_TRACE_FAMILY_NAME_SCORE_PERC_COL).cast(DecimalType(5,2)))
+    .withColumn(GIVENNAME_ALGORITHMIC_MATCH_SCORE_COL, F.col(RES_ALGORITHMIC_TRACE_GIVEN_NAME_SCORE_PERC_COL).cast(DecimalType(5,2)))
+    .withColumn(DATEOFBIRTH_ALGORITHMIC_MATCH_SCORE_COL, F.col(RES_ALGORITHMIC_TRACE_DOB_SCORE_PERC_COL).cast(DecimalType(5,2)))
+    .withColumn(GENDER_ALGORITHMIC_MATCH_SCORE_COL, F.col(RES_ALGORITHMIC_TRACE_GENDER_SCORE_PERC_COL).cast(DecimalType(5,2)))
+    .withColumn(POSTCODE_ALGORITHMIC_MATCH_SCORE_COL, F.col(RES_ALGORITHMIC_TRACE_POSTCODE_SCORE_PERC_COL).cast(DecimalType(5,2)))
+  )                                                          
+  
   return df_requests_and_responses
