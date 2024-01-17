@@ -7,6 +7,10 @@ MPS takes certain demographic information contained in a person’s health and c
 MPS Diagnostics is a new pipeline which takes the contextual information from the MPS response file, and some additional data from PDS, to create 10 columns of meta data explaining in user-friendly terms how each Person ID was derived. MPS Diagnostics pipeline generates the mps_diagnostics data set, which contains record identifiers and the MPS diagnostics columns.
 mps_diagnostics is available upon request for internal NHS England analysts via CDAs (clear data agreements), or for external NHS England users via DSAs (data sharing agreements). This document details the 10 columns, how they are derived and how they are to be used.
 
+## Flow Diagram
+This represents the flow of the main.py notebook.
+![MPSD flow diagram]([https://github](https://github.com/NHSDigital/mps_diagnostics/blob/main/MPSD%20flow%20diagram.png)
+
 ## Environment
 This project runs on the Data Access Environment (DAE) instance of Databricks within NHS Digital. It follows the 'Code Promotion' project structure, which is specific to the NHS Digital 'Code Promotion' process. Code Promotion is a process designed by Data Processing Services (DPS) at NHS Digital to allow users of the DAE to promote code between environments and run jobs on an automated schedule. Within DAE, each Code Promotion project has three jobs which trigger the init_schemas.py, run_tests.py and run_notebooks.py notebooks. Therefore the project structure shown below is a requirement of Code Promotion projects.
 
